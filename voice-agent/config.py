@@ -28,6 +28,11 @@ class Config:
     gemini_keys: list[str] = field(default_factory=lambda: _keys("GEMINI_API_KEY", "GEMINI_FALLBACK_KEYS"))
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
     stt_model: str = os.getenv("STT_MODEL", "whisper-large-v3")
+    # Sarvam — Indian telephony-tuned STT + TTS (preferred when a key is set)
+    sarvam_keys: list[str] = field(default_factory=lambda: _keys("SARVAM_API_KEY", "SARVAM_FALLBACK_KEYS"))
+    sarvam_stt_model: str = os.getenv("SARVAM_STT_MODEL", "saarika:v2.5")
+    sarvam_tts_model: str = os.getenv("SARVAM_TTS_MODEL", "bulbul:v2")
+    sarvam_speaker: str = os.getenv("SARVAM_SPEAKER", "anushka")
 
     tts_voice: str = os.getenv("TTS_VOICE", "hi-IN-SwaraNeural")
     company: str = os.getenv("COMPANY_NAME", "Pinified")

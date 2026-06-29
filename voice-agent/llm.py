@@ -7,6 +7,8 @@ tool-calling shape), so one code path covers Groq, Mistral and Gemini.
 """
 import httpx
 
+import sarvam
+from audio import pcm16_to_wav, upsample_16k
 from config import CFG
 
 # (label, base_url, [keys], model)
@@ -52,7 +54,17 @@ async def chat(messages: list, tools: list | None = None) -> dict:
     raise RuntimeError(f"all chat providers failed (last: {last})")
 
 
-async def transcribe(wav_bytes: bytes) -> str:
+async def transcribe(pcm: bytes) -> str:
+    # Sarvam first — telephony-tuned on 8 kHz Hindi (best accuracy).
+    if sarvam.enabled:
+        try:
+            t = await sarvam.stt(pcm16_to_wav(pcm, 8000))
+            if t:
+                return t
+        except Exception:
+            pass
+    # Whisper fallback — upsample to 16 kHz, which it handles far better.
+    wav16 = pcm16_to_wav(upsample_16k(pcm), 16000)
     last = None
     async with httpx.AsyncClient(timeout=30) as c:
         for label, base, keys, model in STT_CHAIN:
@@ -61,7 +73,7 @@ async def transcribe(wav_bytes: bytes) -> str:
                     r = await c.post(
                         f"{base}/audio/transcriptions",
                         headers={"Authorization": f"Bearer {key}"},
-                        files={"file": ("audio.wav", wav_bytes, "audio/wav")},
+                        files={"file": ("audio.wav", wav16, "audio/wav")},
                         data={"model": model, "language": "hi", "response_format": "json"},
                     )
                     if _retryable(r.status_code):

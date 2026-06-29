@@ -10,24 +10,31 @@ import httpx
 import webrtcvad
 
 import llm as groq
-from audio import pcm16_to_wav, tts_to_ulaw, ulaw_to_pcm16
+from audio import tts_to_ulaw, ulaw_to_pcm16
 from config import CFG
 
 FRAME_MS = 20
 FRAME_BYTES = int(8000 * 2 * FRAME_MS / 1000)  # 320 bytes pcm16 / 20ms
 SILENCE_MS = 800
-MIN_SPEECH_BYTES = int(8000 * 2 * 0.4)  # ignore < 0.4s blips
+MIN_SPEECH_BYTES = int(8000 * 2 * 0.6)  # ignore < 0.6s blips (noise/echo)
 
 SYSTEM_PROMPT = (
     "You are a warm, polite female voice agent for {company}, an Indian vehicle/truck "
     "booking service. The CUSTOMER has called to request a vehicle. Speak ONLY in simple, "
     "natural Hindi (Hinglish is fine), in SHORT one-sentence replies suitable for a phone call.\n"
-    "Collect, ONE question per turn: 1) kaisi gaadi chahiye (vehicle type e.g. 16ft/20ft/32ft), "
-    "2) pickup kahan se (area + city), 3) drop kahan (area + city), 4) kitna price de sakte hain "
-    "(rupees), 5) kab chahiye (date). Briefly read the pickup and drop back to confirm. Do NOT "
-    "negotiate price. When you have ALL details, CALL the tool report_demand. After it runs, say "
-    "exactly: 'Theek hai, aapki request note kar li hai, hum 2 minute mein call back karenge. "
-    "Dhanyavaad.' and stop. Never invent details; keep every reply short."
+    "Collect, ONE question per turn, in this order: 1) kaisi gaadi chahiye (vehicle type e.g. "
+    "16ft/20ft/32ft), 2) pickup kahan se (area + city), 3) drop kahan (area + city), 4) kitna "
+    "price de sakte hain (rupees), 5) kab chahiye (date).\n"
+    "RULES:\n"
+    "- If the caller's words are unclear, empty, or look like noise, politely ask them to repeat "
+    "that one detail. NEVER guess a value.\n"
+    "- After getting pickup and drop, READ THEM BACK to confirm (e.g. 'Andheri se Pune, sahi hai?').\n"
+    "- You MUST have all five (vehicle, pickup, drop, price, date) before calling report_demand. "
+    "Do not call it early.\n"
+    "- Do NOT negotiate price.\n"
+    "After you have all five and confirmed the locations, CALL report_demand, then say exactly: "
+    "'Theek hai, aapki request note kar li hai, hum 2 minute mein call back karenge. Dhanyavaad.' "
+    "and stop. Keep every reply to one short sentence."
 )
 
 TOOLS = [
@@ -46,7 +53,7 @@ TOOLS = [
                     "pickupDate": {"type": "string", "description": "Date needed (any format)."},
                     "note": {"type": "string", "description": "Any extra detail."},
                 },
-                "required": ["fromText", "toText"],
+                "required": ["fromText", "toText", "vehicleType", "offeredPriceInr", "pickupDate"],
             },
         },
     }
@@ -58,7 +65,7 @@ class Call:
         self.ws = ws
         self.from_number = from_number or "unknown"
         self.stream_id = ""
-        self.vad = webrtcvad.Vad(2)
+        self.vad = webrtcvad.Vad(3)  # most aggressive — filter telephony noise
         self.pcm_buf = b""
         self.utterance = bytearray()
         self.triggered = False
@@ -129,11 +136,13 @@ class Call:
 
     async def handle_utterance(self, pcm: bytes):
         try:
-            text = await groq.transcribe(pcm16_to_wav(pcm))
+            text = await groq.transcribe(pcm)
         except Exception as e:
             print(f"[stt] error: {e}", flush=True)
             return
-        if not text:
+        # drop empty / single-char noise transcriptions
+        if len(text.strip()) < 2:
+            print(f"[stt] dropped noise: {text!r}", flush=True)
             return
         print(f"[stt] caller: {text}", flush=True)
         self.messages.append({"role": "user", "content": text})

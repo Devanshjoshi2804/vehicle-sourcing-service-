@@ -12,6 +12,8 @@ import edge_tts
 from gtts import gTTS
 from pydub import AudioSegment
 
+import sarvam
+
 SAMPLE_RATE = 8000
 
 
@@ -21,6 +23,18 @@ def ulaw_to_pcm16(ulaw: bytes) -> bytes:
 
 def pcm16_to_ulaw(pcm: bytes) -> bytes:
     return audioop.lin2ulaw(pcm, 2)
+
+
+def upsample_16k(pcm8k: bytes) -> bytes:
+    """8 kHz → 16 kHz (Whisper performs much better at 16 kHz)."""
+    out, _ = audioop.ratecv(pcm8k, 2, 1, 8000, 16000, None)
+    return out
+
+
+def wav_to_ulaw(wav_bytes: bytes) -> bytes:
+    seg = AudioSegment.from_file(io.BytesIO(wav_bytes), format="wav")
+    seg = seg.set_frame_rate(SAMPLE_RATE).set_channels(1).set_sample_width(2)
+    return pcm16_to_ulaw(seg.raw_data)
 
 
 def pcm16_to_wav(pcm: bytes, rate: int = SAMPLE_RATE) -> bytes:
@@ -48,9 +62,17 @@ def _gtts_mp3(text: str) -> bytes:
 
 
 async def tts_to_ulaw(text: str, voice: str) -> bytes:
-    """Hindi speech → μ-law 8 kHz mono. edge-tts (best voice) with a gTTS
-    fallback — datacenter IPs get 403'd by edge-tts, so we always have a backup.
+    """Hindi speech → μ-law 8 kHz mono. Sarvam (natural, telephony-tuned) first;
+    then edge-tts; then gTTS. Datacenter IPs get 403'd by edge-tts, so we always
+    keep a working backup.
     """
+    if sarvam.enabled:
+        try:
+            wav = await sarvam.tts_wav(text)
+            if wav:
+                return wav_to_ulaw(wav)
+        except Exception:
+            pass
     mp3 = b""
     try:
         mp3 = await _edge_mp3(text, voice)
