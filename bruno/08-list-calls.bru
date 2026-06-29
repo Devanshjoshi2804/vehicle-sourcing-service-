@@ -1,0 +1,14 @@
+meta {
+  name: List Calls
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/loads/{{loadId}}/calls
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+}

@@ -1,0 +1,19 @@
+meta {
+  name: Get Quotes
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/loads/{{loadId}}/quotes?available=YES&acceptsFixed=true
+  auth: none
+}
+
+params:query {
+  available: YES
+  acceptsFixed: true
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+}

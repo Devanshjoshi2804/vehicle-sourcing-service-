@@ -1,0 +1,27 @@
+meta {
+  name: Create Load
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/loads
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "fromLocation": "Mumbai",
+    "toLocation": "Pune",
+    "vehicleType": "16ft",
+    "pickupDate": "2026-07-01",
+    "fixedPriceInr": 13000,
+    "createdBy": "disp1"
+  }
+}

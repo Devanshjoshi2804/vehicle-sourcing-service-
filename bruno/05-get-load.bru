@@ -1,0 +1,14 @@
+meta {
+  name: Get Load
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/loads/{{loadId}}
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+}

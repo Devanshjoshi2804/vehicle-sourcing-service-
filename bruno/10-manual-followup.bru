@@ -1,0 +1,14 @@
+meta {
+  name: Manual Follow-up
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/loads/{{loadId}}/owners/{{ownerId}}/followup
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+}

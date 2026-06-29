@@ -1,0 +1,23 @@
+meta {
+  name: Patch Owner
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/owners/{{ownerId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "vehicleTypes": ["16ft", "20ft"],
+    "active": true
+  }
+}

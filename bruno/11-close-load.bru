@@ -1,0 +1,14 @@
+meta {
+  name: Close Load
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/loads/{{loadId}}/close
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+}

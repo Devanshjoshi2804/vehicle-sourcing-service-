@@ -1,0 +1,27 @@
+meta {
+  name: Webhook Report Availability
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/webhooks/report-availability
+  body: json
+  auth: none
+}
+
+headers {
+  x-webhook-secret: {{webhookSecret}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "conversationId": "conv_replace_me",
+    "available": "YES",
+    "acceptsFixed": true,
+    "quotedPriceInr": 13000,
+    "vehicleType": "16ft",
+    "note": "ready for pickup"
+  }
+}

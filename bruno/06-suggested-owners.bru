@@ -1,0 +1,14 @@
+meta {
+  name: Suggested Owners
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/loads/{{loadId}}/suggested-owners
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Fire Calls
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/loads/{{loadId}}/call
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "ownerIds": ["{{ownerId}}"]
+  }
+}

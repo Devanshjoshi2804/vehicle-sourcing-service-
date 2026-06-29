@@ -1,0 +1,23 @@
+meta {
+  name: Webhook Post Call
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/webhooks/elevenlabs/post-call
+  body: json
+  auth: none
+}
+
+headers {
+  x-webhook-secret: {{webhookSecret}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "conversationId": "conv_replace_me",
+    "transcript": "namaste ... full transcript ..."
+  }
+}
