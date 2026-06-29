@@ -2,7 +2,9 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# --include=dev so TypeScript/tsx install even if the base image or env defaults
+# to production (otherwise `tsc` is missing and the build fails).
+RUN npm ci --include=dev
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build        # tsc + copies src/db/migrations into dist
