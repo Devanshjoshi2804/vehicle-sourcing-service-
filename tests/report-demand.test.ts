@@ -58,12 +58,30 @@ describe("report-demand webhook", () => {
     await app.close();
   });
 
-  it("400s on a malformed pickup date", async () => {
+  it("tolerates missing caller id and a non-ISO spoken date (voice/test friendly)", async () => {
     const { pool } = await withTestDb();
     const app = buildServer({ pool, config, geo: fakeGeo });
     const res = await app.inject({ method: "POST", url: "/webhooks/report-demand", headers: hook,
-      payload: { ...body, conversationId: "x2", pickupDate: "05-07-2026" } });
-    expect(res.statusCode).toBe(400);
+      payload: { conversationId: "voice1", fromText: "andheri", toText: "pune",
+        vehicleType: "16ft", offeredPriceInr: 12000, pickupDate: "kal" } });
+    expect(res.statusCode).toBe(201);
+    const { rows } = await pool.query("SELECT * FROM demand_requests WHERE el_conversation_id='voice1'");
+    expect(rows[0].customer_phone).toBe("unknown");
+    expect(rows[0].pickup_date).toBeNull();
+    expect(rows[0].note).toContain("date said: kal");
+    expect(rows[0].offered_price_inr).toBe(12000);
+    await app.close();
+  });
+
+  it("coerces a string price to a number", async () => {
+    const { pool } = await withTestDb();
+    const app = buildServer({ pool, config, geo: fakeGeo });
+    const res = await app.inject({ method: "POST", url: "/webhooks/report-demand", headers: hook,
+      payload: { conversationId: "voice2", customerPhone: "+919000000001", fromText: "a", toText: "b",
+        offeredPriceInr: "15000" as any } });
+    expect(res.statusCode).toBe(201);
+    const { rows } = await pool.query("SELECT offered_price_inr FROM demand_requests WHERE el_conversation_id='voice2'");
+    expect(rows[0].offered_price_inr).toBe(15000);
     await app.close();
   });
 });

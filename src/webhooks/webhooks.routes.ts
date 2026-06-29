@@ -19,14 +19,16 @@ const PostCallSchema = z.object({
   transcript: z.string().default(""),
 });
 
+// Lenient on purpose — voice transcripts (and dashboard tests) are messy:
+// caller id can be absent, price may arrive as a string, date as "kal".
 const ReportDemandSchema = z.object({
   conversationId: z.string().min(1),
-  customerPhone: z.string().min(1),
+  customerPhone: z.string().optional(),
   fromText: z.string().min(1),
   toText: z.string().min(1),
   vehicleType: z.string().nullable().optional(),
-  offeredPriceInr: z.number().int().nullable().optional(),
-  pickupDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  offeredPriceInr: z.coerce.number().int().nullable().optional(),
+  pickupDate: z.string().nullable().optional(),
   note: z.string().nullable().optional(),
 });
 
@@ -54,21 +56,27 @@ export function registerWebhookRoutes(
     const parsed = ReportDemandSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const b = parsed.data;
+    // Keep pickupDate only if it's a real YYYY-MM-DD; otherwise stash the raw
+    // phrase ("kal", "5 July") in the note so a human can read it on approval.
+    const isoDate = b.pickupDate && /^\d{4}-\d{2}-\d{2}$/.test(b.pickupDate) ? b.pickupDate : null;
+    const rawDateNote = b.pickupDate && !isoDate ? `date said: ${b.pickupDate}` : null;
+    const note = [b.note, rawDateNote].filter(Boolean).join("; ") || null;
+
     const [fromResolved, toResolved] = await Promise.all([
       deps.geo.resolveLocation(b.fromText),
       deps.geo.resolveLocation(b.toText),
     ]);
     const { created, demand } = await deps.demandRepo.upsertByConversation({
-      customerPhone: b.customerPhone,
+      customerPhone: b.customerPhone || "unknown",
       fromText: b.fromText,
       toText: b.toText,
       fromResolved,
       toResolved,
       vehicleType: b.vehicleType ?? null,
       offeredPriceInr: b.offeredPriceInr ?? null,
-      pickupDate: b.pickupDate ?? null,
+      pickupDate: isoDate,
       elConversationId: b.conversationId,
-      note: b.note ?? null,
+      note,
     });
     return reply.code(created ? 201 : 200).send({ created, demandId: demand.id });
   });
