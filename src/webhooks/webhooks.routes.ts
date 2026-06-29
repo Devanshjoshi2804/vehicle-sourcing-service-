@@ -96,6 +96,16 @@ export function registerWebhookRoutes(
     if (created && call.flow === "offer" && b.available === "YES" && b.acceptsFixed === false) {
       await deps.orchestrator.enqueue(call.loadId, [call.ownerId], "fixed_price_followup");
     }
+
+    // Side A: if an owner ACCEPTS the price on a demand-sourced load, confirm the
+    // customer (outbound "request accepted" call) and mark the demand CONFIRMED.
+    if (created && b.available === "YES" && b.acceptsFixed === true) {
+      const demand = await deps.demandRepo.findByLoadId(call.loadId);
+      if (demand && demand.status === "SOURCING") {
+        await deps.orchestrator.confirmCustomer(call.loadId, demand.customerPhone);
+        await deps.demandRepo.setStatus(demand.id, "CONFIRMED");
+      }
+    }
     return reply.code(created ? 201 : 200).send({ created });
   });
 

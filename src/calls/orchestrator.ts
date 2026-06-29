@@ -66,6 +66,26 @@ export class CallOrchestrator {
     await Promise.all(Array.from({ length: Math.min(limit, attempts.length) }, worker));
   }
 
+  // Outbound informational call to the customer ("your vehicle request is
+  // accepted"). No owner/call_attempt — best-effort fire to their number.
+  async confirmCustomer(loadId: string, customerPhone: string): Promise<void> {
+    const load = await this.d.loadsRepo.getLoad(loadId);
+    if (!load) return;
+    const vars: Record<string, string> = {
+      flow: "customer_confirm",
+      company: this.d.config.companyName,
+      from: load.fromLocation,
+      to: load.toLocation,
+      vehicle_type: load.vehicleType,
+      fixed_price: String(load.fixedPriceInr),
+    };
+    try {
+      await this.d.el.originateCall({ toNumber: customerPhone, dynamicVariables: vars });
+    } catch {
+      // best-effort: the demand is still marked CONFIRMED; call can be retried manually
+    }
+  }
+
   private async placeOne(a: CallAttempt, load: Load, owner: Owner, flow: CallFlow) {
     const vars = buildDynamicVars(load, owner, flow, this.d.config.companyName);
     for (let attempt = 1; attempt <= this.d.config.maxAttempts; attempt++) {
