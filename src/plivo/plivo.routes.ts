@@ -25,11 +25,12 @@ export function registerPlivoRoutes(app: FastifyInstance, sipUri: string) {
   const handler = async (req: any, reply: any) => {
     const from = (req.body?.From ?? req.query?.From ?? "").toString().trim();
     const callerId = from ? ` callerId="${from}"` : "";
+    // Plivo dials a SIP endpoint via <User> (NOT <Sip>, which is Twilio's element).
     const xml =
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
       `<Response>\n` +
       `  <Dial${callerId}>\n` +
-      `    <Sip>${sipUri}</Sip>\n` +
+      `    <User>${sipUri}</User>\n` +
       `  </Dial>\n` +
       `</Response>`;
     reply.header("Content-Type", "application/xml").send(xml);

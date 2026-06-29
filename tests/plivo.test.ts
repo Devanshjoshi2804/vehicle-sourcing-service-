@@ -16,7 +16,7 @@ describe("plivo answer url", () => {
     const res = await app.inject({ method: "GET", url: "/plivo/answer" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("xml");
-    expect(res.body).toContain("<Sip>sip:+918065951377@sip.rtc.in.residency.elevenlabs.io;transport=tcp</Sip>");
+    expect(res.body).toContain("<User>sip:+918065951377@sip.rtc.in.residency.elevenlabs.io;transport=tcp</User>");
     expect(res.body).not.toContain("callerId");
     await app.close();
   });
@@ -32,7 +32,7 @@ describe("plivo answer url", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('callerId="+919812345678"');
-    expect(res.body).toContain("<Sip>sip:+918065951377@");
+    expect(res.body).toContain("<User>sip:+918065951377@");
     await app.close();
   });
 });
