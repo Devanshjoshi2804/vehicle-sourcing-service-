@@ -13,6 +13,7 @@ import { QuotesRepo } from "./quotes/quotes.repo.js";
 import { registerQuoteRoutes } from "./quotes/quotes.routes.js";
 import { registerWebhookRoutes } from "./webhooks/webhooks.routes.js";
 import { DemandRepo } from "./demand/demand.repo.js";
+import { registerDemandRoutes } from "./demand/demand.routes.js";
 import { buildGeoResolver, GeoResolver } from "./geo/geo.js";
 import { requireApiKey } from "./auth.js";
 
@@ -47,6 +48,7 @@ export function buildServer(deps: {
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
   registerCallRoutes(app, orchestrator, callsRepo, preHandler);
   registerQuoteRoutes(app, { quotesRepo, orchestrator }, preHandler);
+  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, orchestrator }, preHandler);
   registerWebhookRoutes(app, {
     quotesRepo,
     callsRepo,
