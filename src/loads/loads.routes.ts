@@ -16,6 +16,8 @@ export function registerLoadRoutes(
     return reply.code(201).send(await repo.createLoad(parsed.data));
   });
 
+  app.get("/loads", { preHandler }, async () => repo.listLoads());
+
   app.get<{ Params: { id: string } }>("/loads/:id", { preHandler }, async (req, reply) => {
     const load = await repo.getLoad(req.params.id);
     if (!load) return reply.code(404).send({ error: "not found" });

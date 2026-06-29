@@ -1,4 +1,5 @@
 import Fastify, { FastifyInstance } from "fastify";
+import cors from "@fastify/cors";
 import pg from "pg";
 import { Config } from "./config.js";
 import { OwnersRepo } from "./owners/owners.repo.js";
@@ -25,6 +26,8 @@ export function buildServer(deps: {
   geo?: GeoResolver;
 }): FastifyInstance {
   const app = Fastify({ logger: true });
+  // Dispatcher console is a browser SPA on another origin; the API key gates access.
+  app.register(cors, { origin: true });
   app.get("/health", async () => ({ status: "ok" }));
   registerPlivoRoutes(app, deps.config.plivoAnswerSipUri);
 

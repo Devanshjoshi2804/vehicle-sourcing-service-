@@ -33,6 +33,11 @@ export class LoadsRepo {
     return rows[0] ? rowToLoad(rows[0]) : null;
   }
 
+  async listLoads(): Promise<Load[]> {
+    const { rows } = await this.pool.query(`SELECT * FROM loads ORDER BY created_at DESC LIMIT 200`);
+    return rows.map(rowToLoad);
+  }
+
   async setStatus(id: string, status: LoadStatus): Promise<void> {
     await this.pool.query(`UPDATE loads SET status=$2 WHERE id=$1`, [id, status]);
   }
