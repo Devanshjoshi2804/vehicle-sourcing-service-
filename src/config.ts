@@ -13,6 +13,7 @@ const schema = z.object({
   ELEVENLABS_SIP_PHONE_ID: z.string().min(1),
   PLIVO_AUTH_ID: z.string().optional(),
   PLIVO_AUTH_TOKEN: z.string().optional(),
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
   COMPANY_NAME: z.string().default("Pinified"),
   MAX_CONCURRENT: z.coerce.number().default(2),
   MAX_ATTEMPTS: z.coerce.number().default(2),
@@ -30,6 +31,7 @@ export type Config = {
   elevenLabsSipPhoneId: string;
   plivoAuthId?: string;
   plivoAuthToken?: string;
+  googleMapsApiKey?: string;
   companyName: string;
   maxConcurrent: number;
   maxAttempts: number;
@@ -49,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     elevenLabsSipPhoneId: p.ELEVENLABS_SIP_PHONE_ID,
     plivoAuthId: p.PLIVO_AUTH_ID,
     plivoAuthToken: p.PLIVO_AUTH_TOKEN,
+    googleMapsApiKey: p.GOOGLE_MAPS_API_KEY,
     companyName: p.COMPANY_NAME,
     maxConcurrent: p.MAX_CONCURRENT,
     maxAttempts: p.MAX_ATTEMPTS,
