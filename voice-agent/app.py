@@ -51,6 +51,7 @@ async def answer(request: Request):
 async def stream(ws: WebSocket):
     await ws.accept()
     from_number = ws.query_params.get("from") or ""
+    print(f"[stream] connected, caller={from_number or 'unknown'}", flush=True)
     call = Call(ws, from_number)
     greeted = False
     try:

@@ -130,10 +130,12 @@ class Call:
     async def handle_utterance(self, pcm: bytes):
         try:
             text = await groq.transcribe(pcm16_to_wav(pcm))
-        except Exception:
+        except Exception as e:
+            print(f"[stt] error: {e}", flush=True)
             return
         if not text:
             return
+        print(f"[stt] caller: {text}", flush=True)
         self.messages.append({"role": "user", "content": text})
         await self.respond()
 
@@ -150,6 +152,7 @@ class Call:
                     except Exception:
                         args = {}
                     result = await self.report_demand(args)
+                    print(f"[demand] {args} -> {result}", flush=True)
                     self.messages.append(
                         {"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result)}
                     )
@@ -166,6 +169,7 @@ class Call:
             except Exception:
                 pass
         else:
+            print(f"[llm] agent: {(msg.get('content') or '')[:90]}", flush=True)
             await self.say(msg.get("content") or "Maaf kijiye, dobara boliye.")
 
     async def report_demand(self, args: dict) -> dict:
