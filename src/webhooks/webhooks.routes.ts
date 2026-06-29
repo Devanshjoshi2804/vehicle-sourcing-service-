@@ -3,6 +3,8 @@ import { z } from "zod";
 import { QuotesRepo } from "../quotes/quotes.repo.js";
 import { CallsRepo } from "../calls/calls.repo.js";
 import { CallOrchestrator } from "../calls/orchestrator.js";
+import { DemandRepo } from "../demand/demand.repo.js";
+import { GeoResolver } from "../geo/geo.js";
 
 const ReportSchema = z.object({
   conversationId: z.string().min(1),
@@ -17,6 +19,17 @@ const PostCallSchema = z.object({
   transcript: z.string().default(""),
 });
 
+const ReportDemandSchema = z.object({
+  conversationId: z.string().min(1),
+  customerPhone: z.string().min(1),
+  fromText: z.string().min(1),
+  toText: z.string().min(1),
+  vehicleType: z.string().nullable().optional(),
+  offeredPriceInr: z.number().int().nullable().optional(),
+  pickupDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  note: z.string().nullable().optional(),
+});
+
 function secretGuard(secret: string) {
   return async (req: any, reply: any) => {
     if (req.headers["x-webhook-secret"] !== secret) reply.code(401).send({ error: "unauthorized" });
@@ -29,10 +42,36 @@ export function registerWebhookRoutes(
     quotesRepo: QuotesRepo;
     callsRepo: CallsRepo;
     orchestrator: CallOrchestrator;
+    demandRepo: DemandRepo;
+    geo: GeoResolver;
     secret: string;
   },
 ) {
   const preHandler = secretGuard(deps.secret);
+
+  // Inbound customer call → capture a demand request (geocoded), status NEW.
+  app.post("/webhooks/report-demand", { preHandler }, async (req, reply) => {
+    const parsed = ReportDemandSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const b = parsed.data;
+    const [fromResolved, toResolved] = await Promise.all([
+      deps.geo.resolveLocation(b.fromText),
+      deps.geo.resolveLocation(b.toText),
+    ]);
+    const { created, demand } = await deps.demandRepo.upsertByConversation({
+      customerPhone: b.customerPhone,
+      fromText: b.fromText,
+      toText: b.toText,
+      fromResolved,
+      toResolved,
+      vehicleType: b.vehicleType ?? null,
+      offeredPriceInr: b.offeredPriceInr ?? null,
+      pickupDate: b.pickupDate ?? null,
+      elConversationId: b.conversationId,
+      note: b.note ?? null,
+    });
+    return reply.code(created ? 201 : 200).send({ created, demandId: demand.id });
+  });
 
   app.post("/webhooks/report-availability", { preHandler }, async (req, reply) => {
     const parsed = ReportSchema.safeParse(req.body);

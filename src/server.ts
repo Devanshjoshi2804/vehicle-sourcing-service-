@@ -12,12 +12,15 @@ import { registerCallRoutes } from "./calls/calls.routes.js";
 import { QuotesRepo } from "./quotes/quotes.repo.js";
 import { registerQuoteRoutes } from "./quotes/quotes.routes.js";
 import { registerWebhookRoutes } from "./webhooks/webhooks.routes.js";
+import { DemandRepo } from "./demand/demand.repo.js";
+import { buildGeoResolver, GeoResolver } from "./geo/geo.js";
 import { requireApiKey } from "./auth.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
   config: Config;
   el?: ElevenLabsClient;
+  geo?: GeoResolver;
 }): FastifyInstance {
   const app = Fastify({ logger: true });
   app.get("/health", async () => ({ status: "ok" }));
@@ -37,6 +40,8 @@ export function buildServer(deps: {
   });
 
   const quotesRepo = new QuotesRepo(deps.pool);
+  const demandRepo = new DemandRepo(deps.pool);
+  const geo = deps.geo ?? buildGeoResolver(deps.config);
 
   registerOwnerRoutes(app, ownersRepo, preHandler);
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
@@ -46,6 +51,8 @@ export function buildServer(deps: {
     quotesRepo,
     callsRepo,
     orchestrator,
+    demandRepo,
+    geo,
     secret: deps.config.webhookSecret,
   });
   return app;
