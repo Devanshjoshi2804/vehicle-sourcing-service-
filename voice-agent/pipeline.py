@@ -9,7 +9,7 @@ import json
 import httpx
 import webrtcvad
 
-import groq_client as groq
+import llm as groq
 from audio import pcm16_to_wav, tts_to_ulaw, ulaw_to_pcm16
 from config import CFG
 
