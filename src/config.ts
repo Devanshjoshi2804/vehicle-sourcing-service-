@@ -11,6 +11,8 @@ const schema = z.object({
   ELEVENLABS_API_KEY: z.string().min(1),
   ELEVENLABS_AGENT_SOURCING: z.string().min(1),
   ELEVENLABS_SIP_PHONE_ID: z.string().min(1),
+  PLIVO_AUTH_ID: z.string().optional(),
+  PLIVO_AUTH_TOKEN: z.string().optional(),
   COMPANY_NAME: z.string().default("Pinified"),
   MAX_CONCURRENT: z.coerce.number().default(2),
   MAX_ATTEMPTS: z.coerce.number().default(2),
@@ -26,6 +28,8 @@ export type Config = {
   elevenLabsApiKey: string;
   elevenLabsAgentId: string;
   elevenLabsSipPhoneId: string;
+  plivoAuthId?: string;
+  plivoAuthToken?: string;
   companyName: string;
   maxConcurrent: number;
   maxAttempts: number;
@@ -43,6 +47,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     elevenLabsApiKey: p.ELEVENLABS_API_KEY,
     elevenLabsAgentId: p.ELEVENLABS_AGENT_SOURCING,
     elevenLabsSipPhoneId: p.ELEVENLABS_SIP_PHONE_ID,
+    plivoAuthId: p.PLIVO_AUTH_ID,
+    plivoAuthToken: p.PLIVO_AUTH_TOKEN,
     companyName: p.COMPANY_NAME,
     maxConcurrent: p.MAX_CONCURRENT,
     maxAttempts: p.MAX_ATTEMPTS,
