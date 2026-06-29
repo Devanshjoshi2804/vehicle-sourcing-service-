@@ -4,3 +4,9 @@
 {$PUBLIC_DOMAIN} {
 	reverse_proxy app:4200
 }
+
+# Voice agent — /answer (Plivo Answer URL) + /stream (bidirectional wss).
+# Caddy upgrades the WebSocket transparently.
+{$VOICE_DOMAIN} {
+	reverse_proxy voice-agent:4300
+}

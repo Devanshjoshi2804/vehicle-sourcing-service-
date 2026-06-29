@@ -30,6 +30,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # India-hosted voice agent (Plivo media-stream → Hindi STT/LLM/TTS → report-demand)
+  voice-agent:
+    build: ./voice-agent
+    env_file: .env
+    environment:
+      BACKEND_BASE: "http://app:4200"
+      PUBLIC_WSS_HOST: "${VOICE_DOMAIN:?set VOICE_DOMAIN in .env}"
+    depends_on:
+      - app
+    restart: unless-stopped
+
   caddy:
     image: caddy:2
     ports:
@@ -37,12 +48,14 @@ services:
       - "443:443"
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      VOICE_DOMAIN: ${VOICE_DOMAIN:?set VOICE_DOMAIN in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - app
+      - voice-agent
     restart: unless-stopped
 
 volumes:
