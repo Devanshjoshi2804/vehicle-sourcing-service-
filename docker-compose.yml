@@ -35,6 +35,7 @@ services:
     build: ./voice-agent
     env_file: .env
     environment:
+      PORT: "4300"
       BACKEND_BASE: "http://app:4200"
       PUBLIC_WSS_HOST: "${VOICE_DOMAIN:?set VOICE_DOMAIN in .env}"
     depends_on:
