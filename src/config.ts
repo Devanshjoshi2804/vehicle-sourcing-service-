@@ -14,6 +14,10 @@ const schema = z.object({
   PLIVO_AUTH_ID: z.string().optional(),
   PLIVO_AUTH_TOKEN: z.string().optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
+  // SIP URI the Plivo Answer-URL bridges inbound PSTN calls to (the EL agent).
+  PLIVO_ANSWER_SIP_URI: z
+    .string()
+    .default("sip:+918065951377@sip.rtc.in.residency.elevenlabs.io;transport=tcp"),
   COMPANY_NAME: z.string().default("Pinified"),
   MAX_CONCURRENT: z.coerce.number().default(2),
   MAX_ATTEMPTS: z.coerce.number().default(2),
@@ -32,6 +36,7 @@ export type Config = {
   plivoAuthId?: string;
   plivoAuthToken?: string;
   googleMapsApiKey?: string;
+  plivoAnswerSipUri: string;
   companyName: string;
   maxConcurrent: number;
   maxAttempts: number;
@@ -52,6 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     plivoAuthId: p.PLIVO_AUTH_ID,
     plivoAuthToken: p.PLIVO_AUTH_TOKEN,
     googleMapsApiKey: p.GOOGLE_MAPS_API_KEY,
+    plivoAnswerSipUri: p.PLIVO_ANSWER_SIP_URI,
     companyName: p.COMPANY_NAME,
     maxConcurrent: p.MAX_CONCURRENT,
     maxAttempts: p.MAX_ATTEMPTS,

@@ -15,6 +15,7 @@ import { registerWebhookRoutes } from "./webhooks/webhooks.routes.js";
 import { DemandRepo } from "./demand/demand.repo.js";
 import { registerDemandRoutes } from "./demand/demand.routes.js";
 import { buildGeoResolver, GeoResolver } from "./geo/geo.js";
+import { registerPlivoRoutes } from "./plivo/plivo.routes.js";
 import { requireApiKey } from "./auth.js";
 
 export function buildServer(deps: {
@@ -25,6 +26,7 @@ export function buildServer(deps: {
 }): FastifyInstance {
   const app = Fastify({ logger: true });
   app.get("/health", async () => ({ status: "ok" }));
+  registerPlivoRoutes(app, deps.config.plivoAnswerSipUri);
 
   const preHandler = requireApiKey(deps.config.apiKey);
   const ownersRepo = new OwnersRepo(deps.pool);
