@@ -1,0 +1,6 @@
+# Auto-TLS (Let's Encrypt) reverse proxy → the API container.
+# PUBLIC_DOMAIN must resolve to this host's public IP (a real subdomain, or a
+# zero-config option like <ip-with-dashes>.sslip.io for a quick valid cert).
+{$PUBLIC_DOMAIN} {
+	reverse_proxy app:4200
+}

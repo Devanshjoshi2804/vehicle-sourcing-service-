@@ -1,0 +1,51 @@
+# Standalone deployment unit: Postgres + the API + Caddy (auto-TLS reverse proxy).
+# On the OVH host: cp .env.example .env, fill values incl. PUBLIC_DOMAIN, then
+#   docker compose up -d --build
+name: vehicle-sourcing
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${PG_USER:-sourcing}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
+      POSTGRES_DB: ${PG_DB:-vehicle_sourcing}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-sourcing} -d ${PG_DB:-vehicle_sourcing}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # Override DATABASE_URL to reach the postgres service on the compose network.
+      DATABASE_URL: "postgres://${PG_USER:-sourcing}:${PG_PASSWORD}@postgres:5432/${PG_DB:-vehicle_sourcing}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
