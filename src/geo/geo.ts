@@ -38,7 +38,7 @@ export function buildGeoResolver(
       const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
         text,
       )}&region=in&key=${cfg.googleMapsApiKey}`;
-      const data = await (await fetchFn(url)).json();
+      const data = await (await fetchFn(url, { signal: AbortSignal.timeout(6000) })).json();
       if (data?.status !== "OK" || !data.results?.length) return null;
       const r = data.results[0];
       const comp = r.address_components || [];
@@ -65,6 +65,7 @@ export function buildGeoResolver(
       )}`;
       const data = await (await fetchFn(url, {
         headers: { "User-Agent": "VehicleSourcing/1.0" },
+        signal: AbortSignal.timeout(6000),
       })).json();
       const hit = Array.isArray(data) ? data[0] : null;
       if (!hit) return null;
