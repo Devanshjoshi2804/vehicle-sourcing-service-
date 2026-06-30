@@ -23,8 +23,11 @@ MIN_SPEECH_BYTES = int(8000 * 2 * 0.6)  # ignore < 0.6s blips (noise/echo)
 
 SYSTEM_PROMPT = (
     "You are Priya, a warm, polite female voice agent for {company}, an Indian vehicle/truck "
-    "booking service. The CUSTOMER has called to book a vehicle. Speak ONLY in simple, natural "
-    "Hindi/Hinglish, in SHORT replies (one short sentence, sometimes two), like a real phone call.\n"
+    "booking service. The CUSTOMER has called to book a vehicle.\n"
+    "Reply in simple, natural Hindi, WRITTEN IN DEVANAGARI SCRIPT (देवनागरी) — NOT in Roman/English "
+    "letters — because the text is read aloud by a Hindi voice and Roman text sounds garbled. "
+    "Keep place names and numbers as the caller said them. SHORT replies (one short sentence, "
+    "sometimes two), like a real phone call.\n"
     "\n"
     "Collect FIVE things: 1) vehicle type (e.g. 16 feet / 20 feet / 32 feet), 2) pickup location "
     "(area + city), 3) drop location (area + city), 4) price the customer can pay (rupees), "
@@ -34,14 +37,14 @@ SYSTEM_PROMPT = (
     "- The caller often gives SEVERAL details in one breath, e.g. 'Mumbai se Delhi, 16 feet, "
     "12000 rupaye'. Capture EVERY detail in that turn. Remember what you already have and NEVER "
     "ask again for something already given.\n"
-    "- Briefly repeat back what you understood so they know you heard, e.g. 'Theek hai — Mumbai se "
-    "Delhi, 16 feet, 12 hazaar, note kiya.'\n"
+    "- Briefly repeat back what you understood so they know you heard, e.g. "
+    "'ठीक है — मुंबई से दिल्ली, 16 फीट, 12 हज़ार, नोट कर लिया।'\n"
     "- Then ask, in ONE short natural sentence, ONLY for what is still MISSING. Do not read a fixed "
     "list or ask things in a rigid order — just ask for what's left.\n"
     "- WAIT for the caller to finish; never talk over them, never rush, never repeat the greeting.\n"
     "- If something is unclear or sounds like noise, politely ask them to repeat just that one "
     "detail. NEVER guess or invent a value.\n"
-    "- Once you have BOTH pickup and drop, confirm them once: 'Mumbai se Delhi, sahi hai?'.\n"
+    "- Once you have BOTH pickup and drop, confirm them once: 'मुंबई से दिल्ली, सही है?'.\n"
     "- Do NOT negotiate the price.\n"
     "\n"
     "When you have ALL FIVE and the locations are confirmed, CALL report_demand, then say exactly: "
@@ -74,8 +77,10 @@ TOOLS = [
 # ---- OUTBOUND: calling a vehicle owner to offer a load at a fixed price ----
 OFFER_PROMPT = (
     "You are Priya, a warm, polite female voice agent for {company}. You are CALLING a vehicle "
-    "owner named {owner_name} to offer them a load. Speak ONLY in short, natural Hindi/Hinglish, "
-    "one sentence per turn, like a real phone call.\n"
+    "owner named {owner_name} to offer them a load.\n"
+    "Reply in simple, natural Hindi, WRITTEN IN DEVANAGARI SCRIPT (देवनागरी) — NOT in Roman/English "
+    "letters — because the text is read aloud by a Hindi voice and Roman text sounds garbled. Keep "
+    "place names and numbers as-is. One short sentence per turn, like a real phone call.\n"
     "\n"
     "The load: {frm} se {to}, {vehicle_type} gaadi, fixed rate {fixed_price} rupaye. "
     "This price is FINAL — you must NOT negotiate.\n"
@@ -95,7 +100,7 @@ OFFER_PROMPT = (
     "- Available but wants more money: available=YES, acceptsFixed=false, quotedPriceInr=<their number>.\n"
     "- Not available / not interested: available=NO.\n"
     "- Busy / call later: available=CALLBACK.\n"
-    "After report_availability returns, say a short Hindi closing (e.g. 'Dhanyavaad!') and stop."
+    "After report_availability returns, say a short Devanagari Hindi closing (e.g. 'धन्यवाद!') and stop."
 )
 
 OFFER_TOOLS = [
@@ -188,18 +193,18 @@ class Call:
             price = self.ctx.get("price") or ""
             if self.ctx.get("flow") == "fixed_price_followup":
                 line = (
-                    f"Namaste {owner} ji, {CFG.company} se phir baat ho rahi hai. {frm} se {to} wale "
-                    f"load ke liye hum {price} rupaye fixed hi de sakte hain — kya aap is final price par haan karenge?"
+                    f"नमस्ते {owner} जी, {CFG.company} से फिर बात हो रही है। {frm} से {to} वाले "
+                    f"लोड के लिए हम {price} रुपये फिक्स्ड ही दे सकते हैं — क्या आप इस फाइनल रेट पर हाँ करेंगे?"
                 )
             else:
                 line = (
-                    f"Namaste {owner} ji, {CFG.company} se baat ho rahi hai. Ek load hai {frm} se {to}, "
-                    f"{vt} gaadi, fixed rate {price} rupaye. Kya aap yeh load is rate par le sakte hain?"
+                    f"नमस्ते {owner} जी, {CFG.company} से बात हो रही है। एक लोड है {frm} से {to}, "
+                    f"{vt} गाड़ी, फिक्स्ड रेट {price} रुपये। क्या आप यह लोड इस रेट पर ले सकते हैं?"
                 )
             await self.say(line)
         else:
             await self.say(
-                f"Namaste, {CFG.company} se baat ho rahi hai. Bataiye, kaisi gaadi chahiye aur kahan se kahan jaani hai?"
+                f"नमस्ते, {CFG.company} से बात हो रही है। बताइए, कैसी गाड़ी चाहिए और कहाँ से कहाँ जानी है?"
             )
 
     # ---- audio in ----
@@ -265,9 +270,9 @@ class Call:
             resp2 = await groq.chat(self.messages, self.tools)
             final = resp2["choices"][0]["message"]
             default_close = (
-                "Theek hai, dhanyavaad!"
+                "ठीक है, धन्यवाद!"
                 if self.mode == "offer"
-                else "Theek hai, aapki request note kar li hai, hum 2 minute mein call back karenge. Dhanyavaad."
+                else "ठीक है, आपकी रिक्वेस्ट नोट कर ली है, हम 2 मिनट में कॉल बैक करेंगे। धन्यवाद।"
             )
             await self.say(final.get("content") or default_close)
             self.done = True
@@ -278,7 +283,7 @@ class Call:
                 pass
         else:
             print(f"[llm] agent: {(msg.get('content') or '')[:90]}", flush=True)
-            await self.say(msg.get("content") or "Maaf kijiye, dobara boliye.")
+            await self.say(msg.get("content") or "माफ़ कीजिए, दोबारा बोलिए।")
 
     async def report_demand(self, args: dict) -> dict:
         body = {
