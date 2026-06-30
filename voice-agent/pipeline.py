@@ -18,8 +18,13 @@ FRAME_BYTES = int(8000 * 2 * FRAME_MS / 1000)  # 320 bytes pcm16 / 20ms
 # Wait ~1.6s of silence before treating the caller's turn as finished. People
 # pause mid-sentence to think; at 1s the agent jumped in over them. 1.6s lets the
 # caller breathe/continue before the agent responds (small latency cost, worth it).
-SILENCE_MS = 1600
+SILENCE_MS = 1100  # with barge-in we can shorten this — caller can always cut in
 MIN_SPEECH_BYTES = int(8000 * 2 * 0.6)  # ignore < 0.6s blips (noise/echo)
+# Barge-in: require ~360ms of sustained caller speech to interrupt the agent (high
+# enough to ignore brief noise / residual echo), and ignore the first 250ms of
+# playback (the agent's own voice onset).
+BARGE_MS = 360
+BARGE_GRACE_MS = 250
 
 SYSTEM_PROMPT = (
     "You are Priya, a warm, polite female voice agent for {company}, an Indian vehicle/truck "
@@ -139,7 +144,12 @@ class Call:
         self.triggered = False
         self.silence_frames = 0
         self.speaking = False
+        self.thinking = False  # in STT/LLM — ignore caller audio (short window)
         self.done = False
+        self.speak_task = None  # cancellable playback wait (for barge-in)
+        self.barge_frames = 0
+        self.barge_buf = bytearray()
+        self.play_frames = 0  # frames since playback started (barge grace window)
         if mode == "offer":
             system = OFFER_PROMPT.format(
                 company=CFG.company,
@@ -170,21 +180,53 @@ class Call:
             }
         )
 
+    async def _clear_playback(self):
+        # Tell Plivo to flush audio already queued for playback (so the agent goes
+        # quiet immediately when interrupted, not after the buffer drains).
+        try:
+            await self.ws.send_json({"event": "clearAudio", "streamId": self.stream_id})
+        except Exception:
+            pass
+
     async def say(self, text: str):
         if not text:
             return
+        ulaw = await tts_to_ulaw(text, CFG.tts_voice)
+        if not ulaw:
+            return
+        self.barge_frames = 0
+        self.barge_buf = bytearray()
+        self.play_frames = 0
         self.speaking = True
+        await self.play(ulaw)
+        # Wait out the audio in a cancellable task — barge-in cancels it.
+        self.speak_task = asyncio.create_task(asyncio.sleep(len(ulaw) / 8000.0 + 0.3))
         try:
-            ulaw = await tts_to_ulaw(text, CFG.tts_voice)
-            await self.play(ulaw)
-            await asyncio.sleep(len(ulaw) / 8000.0 + 0.4)  # let it finish before listening
+            await self.speak_task
+        except asyncio.CancelledError:
+            return  # interrupted — keep whatever the caller has started saying
         finally:
-            # drop anything captured while we were talking (avoid self-echo)
-            self.pcm_buf = b""
-            self.utterance = bytearray()
-            self.triggered = False
-            self.silence_frames = 0
+            self.speak_task = None
             self.speaking = False
+        # finished normally: drop any echo captured during playback
+        self.pcm_buf = b""
+        self.utterance = bytearray()
+        self.triggered = False
+        self.silence_frames = 0
+
+    async def _barge_in(self):
+        print("[barge] caller interrupted — stopping agent", flush=True)
+        await self._clear_playback()
+        if self.speak_task and not self.speak_task.done():
+            self.speak_task.cancel()
+        self.speaking = False
+        self.thinking = False
+        # seed the new utterance with what they've already said so nothing is lost
+        self.utterance = bytearray(self.barge_buf)
+        self.triggered = True
+        self.silence_frames = 0
+        self.barge_frames = 0
+        self.barge_buf = bytearray()
 
     async def greet(self):
         if self.mode == "offer":
@@ -211,13 +253,38 @@ class Call:
 
     # ---- audio in ----
     async def on_media(self, payload_b64: str):
-        if self.speaking or self.done:
+        if self.done:
             return
         self.pcm_buf += ulaw_to_pcm16(base64.b64decode(payload_b64))
         while len(self.pcm_buf) >= FRAME_BYTES:
             frame = self.pcm_buf[:FRAME_BYTES]
             self.pcm_buf = self.pcm_buf[FRAME_BYTES:]
             speech = self.vad.is_speech(frame, 8000)
+
+            if self.speaking:
+                # Listen for the caller talking OVER the agent → barge-in.
+                self.play_frames += 1
+                if not CFG.barge_in or self.play_frames * FRAME_MS < BARGE_GRACE_MS:
+                    continue
+                if speech:
+                    self.barge_frames += 1
+                    self.barge_buf += frame
+                    if self.barge_frames * FRAME_MS >= BARGE_MS:
+                        await self._barge_in()
+                else:
+                    # brief gaps don't reset hard, but sustained silence does
+                    self.barge_frames = max(0, self.barge_frames - 1)
+                    if self.barge_frames == 0:
+                        self.barge_buf = bytearray()
+                    else:
+                        self.barge_buf += frame
+                continue
+
+            if self.thinking:
+                # agent is computing its reply (short window) — ignore input
+                continue
+
+            # idle: normal end-of-turn detection
             if speech:
                 self.triggered = True
                 self.silence_frames = 0
@@ -231,21 +298,25 @@ class Call:
                     self.triggered = False
                     self.silence_frames = 0
                     if len(utt) >= MIN_SPEECH_BYTES:
-                        await self.handle_utterance(utt)
+                        self.thinking = True
+                        asyncio.create_task(self.handle_utterance(utt))
 
     async def handle_utterance(self, pcm: bytes):
         try:
-            text = await groq.transcribe(pcm)
-        except Exception as e:
-            print(f"[stt] error: {e}", flush=True)
-            return
-        # drop empty / single-char noise transcriptions
-        if len(text.strip()) < 2:
-            print(f"[stt] dropped noise: {text!r}", flush=True)
-            return
-        print(f"[stt] caller: {text}", flush=True)
-        self.messages.append({"role": "user", "content": text})
-        await self.respond()
+            try:
+                text = await groq.transcribe(pcm)
+            except Exception as e:
+                print(f"[stt] error: {e}", flush=True)
+                return
+            # drop empty / single-char noise transcriptions
+            if len(text.strip()) < 2:
+                print(f"[stt] dropped noise: {text!r}", flush=True)
+                return
+            print(f"[stt] caller: {text}", flush=True)
+            self.messages.append({"role": "user", "content": text})
+            await self.respond()
+        finally:
+            self.thinking = False
 
     async def respond(self):
         resp = await groq.chat(self.messages, self.tools)

@@ -2,6 +2,7 @@
 caller's audio here (media stays in India → no domestic-anchoring error). We run
 the Hindi conversation and submit the demand to the backend.
 """
+import asyncio
 import urllib.parse
 from xml.sax.saxutils import escape as xml_escape
 
@@ -93,12 +94,12 @@ async def stream(ws: WebSocket):
                 call.stream_id = msg.get("streamId") or (msg.get("start") or {}).get("streamId") or ""
                 if not greeted:
                     greeted = True
-                    await call.greet()
+                    asyncio.create_task(call.greet())  # non-blocking so we can barge the greeting
             elif event == "media":
                 if not greeted:
                     # some streams send media before we see 'start'
                     greeted = True
-                    await call.greet()
+                    asyncio.create_task(call.greet())
                 payload = (msg.get("media") or {}).get("payload")
                 if payload:
                     await call.on_media(payload)

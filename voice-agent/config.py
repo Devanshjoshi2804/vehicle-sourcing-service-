@@ -41,6 +41,9 @@ class Config:
     webhook_secret: str = os.getenv("WEBHOOK_SECRET", "")
     public_wss_host: str = os.getenv("PUBLIC_WSS_HOST", "")
     port: int = int(os.getenv("PORT", "4300"))
+    # barge-in: let the caller interrupt the agent mid-sentence. Kill-switch in case
+    # telephony echo causes the agent to interrupt itself (set BARGE_IN=0).
+    barge_in: bool = os.getenv("BARGE_IN", "1") not in ("0", "false", "False", "")
 
 
 CFG = Config()
