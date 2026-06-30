@@ -41,6 +41,18 @@ export function buildServer(deps: {
       done(err as Error, undefined);
     }
   });
+  // Catch-all: Plivo CX sends an empty body as application/octet-stream (415 by
+  // default). Accept any other content type — empty → {}, else best-effort JSON —
+  // so webhook handlers can fall back to reading query params.
+  app.addContentTypeParser("*", { parseAs: "string" }, (_req, body, done) => {
+    const s = (body as string)?.trim();
+    if (!s) return done(null, {});
+    try {
+      done(null, JSON.parse(s));
+    } catch {
+      done(null, {});
+    }
+  });
   // Dispatcher console is a browser SPA on another origin; the API key gates access.
   app.register(cors, { origin: true });
   app.get("/health", async () => ({ status: "ok" }));
