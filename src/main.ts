@@ -1,9 +1,12 @@
 import { buildServer } from "./server.js";
 import { loadConfig } from "./config.js";
 import { getPool } from "./db/pool.js";
+import { startCallWatchdog } from "./calls/watchdog.js";
 
 const cfg = loadConfig();
-const app = buildServer({ pool: getPool(cfg.databaseUrl), config: cfg });
+const pool = getPool(cfg.databaseUrl);
+const app = buildServer({ pool, config: cfg });
+startCallWatchdog(pool, { staleMinutes: cfg.callStaleMinutes, log: (m) => app.log.info(m) });
 app.listen({ port: cfg.port, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);
   process.exit(1);

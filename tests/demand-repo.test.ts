@@ -38,7 +38,7 @@ describe("DemandRepo", () => {
     const d = (await repo.upsertByConversation(input)).demand;
 
     expect(await repo.list({ status: "NEW" })).toHaveLength(1);
-    expect(await repo.list({ status: "CONFIRMED" })).toHaveLength(0);
+    expect(await repo.list({ status: "BOOKED" })).toHaveLength(0);
 
     const load = await new LoadsRepo(pool).createLoad({
       fromLocation: "Mumbai", toLocation: "Pune", vehicleType: "16ft",

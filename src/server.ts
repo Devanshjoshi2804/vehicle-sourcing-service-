@@ -53,12 +53,14 @@ export function buildServer(deps: {
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
   registerCallRoutes(app, orchestrator, callsRepo, preHandler);
   registerQuoteRoutes(app, { quotesRepo, orchestrator }, preHandler);
-  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, orchestrator }, preHandler);
+  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator }, preHandler);
   registerWebhookRoutes(app, {
     quotesRepo,
     callsRepo,
     orchestrator,
     demandRepo,
+    loadsRepo,
+    ownersRepo,
     geo,
     secret: deps.config.webhookSecret,
   });

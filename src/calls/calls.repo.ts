@@ -1,7 +1,17 @@
 import pg from "pg";
 
 export type CallFlow = "offer" | "fixed_price_followup";
-export type CallStatus = "QUEUED" | "DIALING" | "IN_PROGRESS" | "DONE" | "NO_ANSWER" | "FAILED";
+// SUPERSEDED: a different driver locked the load first, so this call no longer
+// matters — we stop dialing and mark it so the board doesn't show it "on call".
+export type CallStatus =
+  | "QUEUED"
+  | "DIALING"
+  | "IN_PROGRESS"
+  | "DONE"
+  | "NO_ANSWER"
+  | "FAILED"
+  | "SUPERSEDED";
+const LIVE_STATUSES = ["QUEUED", "DIALING", "IN_PROGRESS"] as const;
 export type NewCallAttempt = {
   loadId: string;
   ownerId: string;
@@ -82,5 +92,30 @@ export class CallsRepo {
       [loadId],
     );
     return rows.map(rowToCall);
+  }
+
+  // First-accept-wins: once one driver locks the load, stop dialing everyone else
+  // on it. Marks every other live call SUPERSEDED and returns how many.
+  async supersedePending(loadId: string, exceptOwnerId: string): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE call_attempts SET status='SUPERSEDED', ended_at=now()
+       WHERE load_id=$1 AND owner_id<>$2 AND status = ANY($3)`,
+      [loadId, exceptOwnerId, LIVE_STATUSES],
+    );
+    return rowCount ?? 0;
+  }
+
+  // Watchdog: a call that's been ringing / in-progress past the timeout never got
+  // a terminal webhook (caller hung up, agent died). Close it so the board stops
+  // showing it permanently "on call". Returns the ids that were expired.
+  async expireStale(olderThanMs: number): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      `UPDATE call_attempts SET status='NO_ANSWER', ended_at=now()
+       WHERE status = ANY($1)
+         AND created_at < now() - ($2::numeric * interval '1 millisecond')
+       RETURNING id`,
+      [["DIALING", "IN_PROGRESS"], olderThanMs],
+    );
+    return rows.map((r) => r.id);
   }
 }

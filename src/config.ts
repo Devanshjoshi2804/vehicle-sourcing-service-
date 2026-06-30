@@ -21,6 +21,9 @@ const schema = z.object({
   COMPANY_NAME: z.string().default("Pinified"),
   MAX_CONCURRENT: z.coerce.number().default(2),
   MAX_ATTEMPTS: z.coerce.number().default(2),
+  // A call ringing / in-progress longer than this with no result is force-closed
+  // by the watchdog (fixes calls stuck "on air" when no terminal webhook arrives).
+  CALL_STALE_MINUTES: z.coerce.number().default(5),
 });
 
 export type Config = {
@@ -40,6 +43,7 @@ export type Config = {
   companyName: string;
   maxConcurrent: number;
   maxAttempts: number;
+  callStaleMinutes: number;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -61,5 +65,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     companyName: p.COMPANY_NAME,
     maxConcurrent: p.MAX_CONCURRENT,
     maxAttempts: p.MAX_ATTEMPTS,
+    callStaleMinutes: p.CALL_STALE_MINUTES,
   };
 }

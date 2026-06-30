@@ -45,37 +45,52 @@ describe("demand dashboard routes", () => {
     await app.close();
   });
 
-  it("approve creates a load, auto-calls a matching owner, marks SOURCING", async () => {
+  it("a complete demand with a matching driver auto-sources on capture (no human step)", async () => {
     const { pool } = await withTestDb();
     const calls: string[] = [];
     const app = appWith(pool, calls);
     // owner whose lane Mumbai→Mumbai + 16ft matches the geocoded demand
     await app.inject({ method: "POST", url: "/owners", headers: auth,
       payload: { name: "Owner1", phone: "+919111111111", vehicleTypes: ["16ft"], lanes: [{ from: "Mumbai", to: "Mumbai" }] } });
-    const id = await seedDemand(app, "d2");
-
-    const res = await app.inject({ method: "POST", url: `/demand/${id}/approve`, headers: auth, payload: {} });
-    expect(res.statusCode).toBe(202);
-    expect(res.json().calledOwners).toBe(1);
-    expect(res.json().status).toBe("SOURCING");
-    expect(calls).toHaveLength(1); // an outbound owner call was placed
+    const id = await seedDemand(app, "d2"); // report-demand auto-sources
 
     const d = (await app.inject({ method: "GET", url: `/demand/${id}`, headers: auth })).json();
     expect(d.status).toBe("SOURCING");
     expect(d.loadId).toBeTruthy();
+    expect(calls).toHaveLength(1); // an outbound owner call was placed automatically
 
     const load = (await app.inject({ method: "GET", url: `/loads/${d.loadId}`, headers: auth })).json();
-    expect(load.fixedPriceInr).toBe(12000); // defaulted to customer's offered price
+    expect(load.fixedPriceInr).toBe(12000); // the customer's offered price
     expect(load.vehicleType).toBe("16ft");
+
+    // /approve is the NEW-only manual fallback → already SOURCING → 409
+    const reAppr = await app.inject({ method: "POST", url: `/demand/${id}/approve`, headers: auth, payload: {} });
+    expect(reAppr.statusCode).toBe(409);
     await app.close();
   });
 
-  it("approve twice is rejected (409)", async () => {
+  it("manual approve sources a demand that had no driver at capture", async () => {
     const { pool } = await withTestDb();
-    const app = appWith(pool, []);
+    const calls: string[] = [];
+    const app = appWith(pool, calls);
+    // no owners yet → the complete demand can't auto-source, stays NEW
     const id = await seedDemand(app, "d3");
-    await app.inject({ method: "POST", url: `/demand/${id}/approve`, headers: auth, payload: { ownerIds: [] } });
-    const again = await app.inject({ method: "POST", url: `/demand/${id}/approve`, headers: auth, payload: { ownerIds: [] } });
+    let d = (await app.inject({ method: "GET", url: `/demand/${id}`, headers: auth })).json();
+    expect(d.status).toBe("NEW");
+    expect(calls).toHaveLength(0);
+
+    // a matching driver is added later; dispatcher sources by hand
+    await app.inject({ method: "POST", url: "/owners", headers: auth,
+      payload: { name: "Late", phone: "+919111111111", vehicleTypes: ["16ft"], lanes: [{ from: "Mumbai", to: "Mumbai" }] } });
+    const res = await app.inject({ method: "POST", url: `/demand/${id}/approve`, headers: auth, payload: {} });
+    expect(res.statusCode).toBe(202);
+    expect(res.json().calledOwners).toBe(1);
+
+    d = (await app.inject({ method: "GET", url: `/demand/${id}`, headers: auth })).json();
+    expect(d.status).toBe("SOURCING");
+
+    // double approve now 409
+    const again = await app.inject({ method: "POST", url: `/demand/${id}/approve`, headers: auth, payload: {} });
     expect(again.statusCode).toBe(409);
     await app.close();
   });

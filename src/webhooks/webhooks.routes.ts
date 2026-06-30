@@ -4,7 +4,10 @@ import { QuotesRepo } from "../quotes/quotes.repo.js";
 import { CallsRepo } from "../calls/calls.repo.js";
 import { CallOrchestrator } from "../calls/orchestrator.js";
 import { DemandRepo } from "../demand/demand.repo.js";
+import { LoadsRepo } from "../loads/loads.repo.js";
+import { OwnersRepo } from "../owners/owners.repo.js";
 import { GeoResolver } from "../geo/geo.js";
+import { sourceDemand } from "../demand/sourcing.js";
 
 const ReportSchema = z.object({
   conversationId: z.string().min(1),
@@ -32,6 +35,17 @@ const ReportDemandSchema = z.object({
   note: z.string().nullable().optional(),
 });
 
+// The customer-confirm call (or a manual dispatcher action) reports whether the
+// customer accepted the locked price. loadId is the stable key; demandId works too.
+const CustomerConfirmSchema = z
+  .object({
+    loadId: z.string().uuid().optional(),
+    demandId: z.string().uuid().optional(),
+    conversationId: z.string().optional(),
+    accepted: z.boolean(),
+  })
+  .refine((b) => b.loadId || b.demandId, { message: "loadId or demandId required" });
+
 function secretGuard(secret: string) {
   return async (req: any, reply: any) => {
     if (req.headers["x-webhook-secret"] !== secret) reply.code(401).send({ error: "unauthorized" });
@@ -45,13 +59,24 @@ export function registerWebhookRoutes(
     callsRepo: CallsRepo;
     orchestrator: CallOrchestrator;
     demandRepo: DemandRepo;
+    loadsRepo: LoadsRepo;
+    ownersRepo: OwnersRepo;
     geo: GeoResolver;
     secret: string;
   },
 ) {
   const preHandler = secretGuard(deps.secret);
+  const sourcingDeps = {
+    demandRepo: deps.demandRepo,
+    loadsRepo: deps.loadsRepo,
+    ownersRepo: deps.ownersRepo,
+    callsRepo: deps.callsRepo,
+    orchestrator: deps.orchestrator,
+  };
 
-  // Inbound customer call → capture a demand request (geocoded), status NEW.
+  // Inbound customer call → capture a demand (geocoded). The domino starts here:
+  // if the demand is complete (vehicle + price + a matching driver), we AUTO-call
+  // drivers immediately. Otherwise it stays NEW for a dispatcher to source by hand.
   app.post("/webhooks/report-demand", { preHandler }, async (req, reply) => {
     const parsed = ReportDemandSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -79,7 +104,21 @@ export function registerWebhookRoutes(
         b.conversationId || `ext_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
       note,
     });
-    return reply.code(created ? 201 : 200).send({ created, demandId: demand.id });
+
+    // Domino step 1 — auto-source the drivers (only on first capture, only if complete).
+    let sourcing: { sourced: boolean; reason?: string; loadId?: string; calledOwners?: number } = {
+      sourced: false,
+      reason: "duplicate",
+    };
+    if (created) sourcing = await sourceDemand(sourcingDeps, demand);
+
+    return reply.code(created ? 201 : 200).send({
+      created,
+      demandId: demand.id,
+      sourced: sourcing.sourced,
+      calledOwners: sourcing.calledOwners ?? 0,
+      sourcingSkipped: sourcing.sourced ? undefined : sourcing.reason,
+    });
   });
 
   app.post("/webhooks/report-availability", { preHandler }, async (req, reply) => {
@@ -106,16 +145,51 @@ export function registerWebhookRoutes(
       await deps.orchestrator.enqueue(call.loadId, [call.ownerId], "fixed_price_followup");
     }
 
-    // Side A: if an owner ACCEPTS the price on a demand-sourced load, confirm the
-    // customer (outbound "request accepted" call) and mark the demand CONFIRMED.
+    // Domino step 2 — first driver to ACCEPT the fixed price locks the load. We
+    // record the winner, stop dialing everyone else, and stop here: the customer
+    // is NOT called yet — the company approves the value first (see /approve-driver).
     if (created && b.available === "YES" && b.acceptsFixed === true) {
+      const load = await deps.loadsRepo.getLoad(call.loadId);
       const demand = await deps.demandRepo.findByLoadId(call.loadId);
-      if (demand && demand.status === "SOURCING") {
-        await deps.orchestrator.confirmCustomer(call.loadId, demand.customerPhone);
-        await deps.demandRepo.setStatus(demand.id, "CONFIRMED");
+      if (demand) {
+        const locked = await deps.demandRepo.lockDriver(
+          call.loadId,
+          call.ownerId,
+          load?.fixedPriceInr ?? b.quotedPriceInr ?? 0,
+        );
+        if (locked) {
+          await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
+          await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
+        }
+      } else if (load && load.status === "CALLING") {
+        // Side-B (dispatcher-posted, no customer): first accepter still locks the
+        // load and stops the other calls; the dispatcher closes it.
+        await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
+        await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
       }
     }
     return reply.code(created ? 201 : 200).send({ created });
+  });
+
+  // Domino step 4 — the customer-confirm call (or the manual "customer confirmed"
+  // button) reports the customer's answer. Yes → BOOKED; no → DECLINED.
+  app.post("/webhooks/customer-confirm", { preHandler }, async (req, reply) => {
+    const parsed = CustomerConfirmSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const b = parsed.data;
+    const demand = b.demandId
+      ? await deps.demandRepo.getById(b.demandId)
+      : await deps.demandRepo.findByLoadId(b.loadId!);
+    if (!demand) return reply.code(404).send({ error: "unknown demand" });
+
+    if (b.accepted) {
+      const booked = await deps.demandRepo.book(demand.id);
+      if (booked && demand.loadId) await deps.loadsRepo.setStatus(demand.loadId, "BOOKED");
+      return reply.code(booked ? 200 : 409).send({ status: booked?.status ?? demand.status });
+    }
+    await deps.demandRepo.setStatus(demand.id, "DECLINED");
+    if (demand.loadId) await deps.loadsRepo.setStatus(demand.loadId, "CLOSED");
+    return { status: "DECLINED" };
   });
 
   app.post("/webhooks/elevenlabs/post-call", { preHandler }, async (req, reply) => {

@@ -9,5 +9,7 @@ export const LoadInputSchema = z.object({
   createdBy: z.string().min(1),
 });
 export type LoadInput = z.infer<typeof LoadInputSchema>;
-export type LoadStatus = "DRAFT" | "CALLING" | "CLOSED";
+// DRAFT → CALLING → LOCKED (a driver took the fixed price) → BOOKED (customer
+// confirmed). CLOSED is the manual terminal state for dispatcher-posted loads.
+export type LoadStatus = "DRAFT" | "CALLING" | "LOCKED" | "BOOKED" | "CLOSED";
 export type Load = LoadInput & { id: string; status: LoadStatus; createdAt: string };

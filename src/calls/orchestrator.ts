@@ -68,7 +68,7 @@ export class CallOrchestrator {
 
   // Outbound informational call to the customer ("your vehicle request is
   // accepted"). No owner/call_attempt — best-effort fire to their number.
-  async confirmCustomer(loadId: string, customerPhone: string): Promise<void> {
+  async confirmCustomer(loadId: string, customerPhone: string, demandId?: string): Promise<void> {
     const load = await this.d.loadsRepo.getLoad(loadId);
     if (!load) return;
     const vars: Record<string, string> = {
@@ -78,6 +78,9 @@ export class CallOrchestrator {
       to: load.toLocation,
       vehicle_type: load.vehicleType,
       fixed_price: String(load.fixedPriceInr),
+      // echoed back by the confirm flow to /webhooks/customer-confirm
+      load_id: loadId,
+      ...(demandId ? { demand_id: demandId } : {}),
     };
     try {
       await this.d.el.originateCall({ toNumber: customerPhone, dynamicVariables: vars });
@@ -89,6 +92,10 @@ export class CallOrchestrator {
   private async placeOne(a: CallAttempt, load: Load, owner: Owner, flow: CallFlow) {
     const vars = buildDynamicVars(load, owner, flow, this.d.config.companyName);
     for (let attempt = 1; attempt <= this.d.config.maxAttempts; attempt++) {
+      // First-accept-wins: a driver may have locked this load while this call sat
+      // queued behind the concurrency limit. If so, don't dial them.
+      const current = await this.d.callsRepo.getById(a.id);
+      if (current && current.status === "SUPERSEDED") return;
       try {
         await this.d.callsRepo.setStatus(a.id, "DIALING");
         const { conversationId } = await this.d.el.originateCall({
