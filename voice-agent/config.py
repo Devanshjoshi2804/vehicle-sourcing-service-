@@ -33,6 +33,7 @@ class Config:
     sarvam_stt_model: str = os.getenv("SARVAM_STT_MODEL", "saarika:v2.5")
     sarvam_tts_model: str = os.getenv("SARVAM_TTS_MODEL", "bulbul:v2")
     sarvam_speaker: str = os.getenv("SARVAM_SPEAKER", "anushka")
+    sarvam_pace: float = float(os.getenv("SARVAM_PACE", "1.0"))  # <1 slower/clearer on phone
 
     tts_voice: str = os.getenv("TTS_VOICE", "hi-IN-SwaraNeural")
     company: str = os.getenv("COMPANY_NAME", "Pinified")

@@ -33,7 +33,12 @@ async def stt(wav_bytes: bytes) -> str | None:
 
 
 async def tts_wav(text: str) -> bytes | None:
-    """Returns WAV bytes (8 kHz) or None."""
+    """Returns WAV bytes at full quality (22.05 kHz) or None.
+
+    Synthesize at 22.05 kHz — bulbul sounds muffled/robotic if asked to render
+    straight to telephony 8 kHz. The caller downsamples to 8 kHz μ-law, which
+    keeps far more clarity than native 8 kHz synthesis.
+    """
     for key in CFG.sarvam_keys:
         try:
             async with httpx.AsyncClient(timeout=30) as c:
@@ -45,7 +50,9 @@ async def tts_wav(text: str) -> bytes | None:
                         "target_language_code": "hi-IN",
                         "speaker": CFG.sarvam_speaker,
                         "model": CFG.sarvam_tts_model,
-                        "speech_sample_rate": 8000,
+                        "speech_sample_rate": 22050,
+                        "pace": CFG.sarvam_pace,
+                        "enable_preprocessing": True,  # normalize numbers / Hinglish
                     },
                 )
                 if r.status_code == 429:
