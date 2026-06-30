@@ -3,6 +3,7 @@ caller's audio here (media stays in India → no domestic-anchoring error). We r
 the Hindi conversation and submit the demand to the backend.
 """
 import urllib.parse
+from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
@@ -21,11 +22,14 @@ async def health():
 def _stream_xml(params: dict) -> str:
     host = CFG.public_wss_host
     q = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+    # The query joins params with '&', which is illegal raw inside XML — escape it
+    # to '&amp;' or Plivo rejects the document ("Invalid Answer XML").
+    url = xml_escape(f"wss://{host}/stream?{q}")
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         "<Response>\n"
         f'  <Stream bidirectional="true" keepCallAlive="true" '
-        f'contentType="audio/x-mulaw;rate=8000">wss://{host}/stream?{q}</Stream>\n'
+        f'contentType="audio/x-mulaw;rate=8000">{url}</Stream>\n'
         "</Response>"
     )
 
