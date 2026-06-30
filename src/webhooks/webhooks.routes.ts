@@ -143,6 +143,17 @@ export function registerWebhookRoutes(
   });
 
   app.post("/webhooks/report-availability", { preHandler }, async (req, reply) => {
+    // TEMP diagnostic: log exactly what the caller sent (body/query/content-type).
+    app.log.info(
+      {
+        ct: req.headers["content-type"],
+        cl: req.headers["content-length"],
+        ua: req.headers["user-agent"],
+        body: req.body,
+        query: req.query,
+      },
+      "[report-avail RAW]",
+    );
     // Accept fields from the JSON body OR the URL query string (Plivo CX sends an
     // empty body and puts everything in query params).
     const merged = { ...((req.query as object) ?? {}), ...((req.body as object) ?? {}) };
