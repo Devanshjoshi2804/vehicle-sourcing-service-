@@ -15,10 +15,10 @@ from config import CFG
 
 FRAME_MS = 20
 FRAME_BYTES = int(8000 * 2 * FRAME_MS / 1000)  # 320 bytes pcm16 / 20ms
-# Wait ~1s of silence before treating the caller's turn as finished — long enough
-# that someone reeling off "Mumbai se Delhi, 16 feet, 12000" in one breath isn't
-# cut off mid-sentence (the old 800ms felt like the agent talked over you).
-SILENCE_MS = 1000
+# Wait ~1.6s of silence before treating the caller's turn as finished. People
+# pause mid-sentence to think; at 1s the agent jumped in over them. 1.6s lets the
+# caller breathe/continue before the agent responds (small latency cost, worth it).
+SILENCE_MS = 1600
 MIN_SPEECH_BYTES = int(8000 * 2 * 0.6)  # ignore < 0.6s blips (noise/echo)
 
 SYSTEM_PROMPT = (
@@ -42,6 +42,8 @@ SYSTEM_PROMPT = (
     "- Then ask, in ONE short natural sentence, ONLY for what is still MISSING. Do not read a fixed "
     "list or ask things in a rigid order — just ask for what's left.\n"
     "- WAIT for the caller to finish; never talk over them, never rush, never repeat the greeting.\n"
+    "- Keep EVERY reply to ONE short sentence, max ~12 words. Ask one thing, then STOP and let them "
+    "speak. Never give long explanations or apologise at length.\n"
     "- If something is unclear or sounds like noise, politely ask them to repeat just that one "
     "detail. NEVER guess or invent a value.\n"
     "- Once you have BOTH pickup and drop, confirm them once: 'मुंबई से दिल्ली, सही है?'.\n"
@@ -93,7 +95,7 @@ OFFER_PROMPT = (
     "- Do NOT negotiate. If they ask for more money, say politely it is a fixed-price load, note the "
     "number they asked, and close.\n"
     "- If unclear or noisy, ask once to repeat. NEVER guess.\n"
-    "- Keep every reply to one short sentence.\n"
+    "- Keep EVERY reply to ONE short sentence, max ~12 words. Then STOP and let them speak.\n"
     "\n"
     "Decide ONE outcome and pass it to report_availability:\n"
     "- Yes at the fixed price: available=YES, acceptsFixed=true.\n"
