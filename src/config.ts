@@ -13,6 +13,11 @@ const schema = z.object({
   ELEVENLABS_SIP_PHONE_ID: z.string().min(1),
   PLIVO_AUTH_ID: z.string().optional(),
   PLIVO_AUTH_TOKEN: z.string().optional(),
+  // Which provider places outbound driver calls: ElevenLabs SIP (legacy, fails
+  // India anchoring) or Plivo CX AgentFlow (India-hosted media — works domestically).
+  VOICE_PROVIDER: z.enum(["elevenlabs", "plivo"]).default("elevenlabs"),
+  // The Plivo AgentFlow trigger URL (POST starts an outbound call with our vars).
+  PLIVO_AGENTFLOW_URL: z.string().optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
   // SIP URI the Plivo Answer-URL bridges inbound PSTN calls to (the EL agent).
   PLIVO_ANSWER_SIP_URI: z
@@ -38,6 +43,8 @@ export type Config = {
   elevenLabsSipPhoneId: string;
   plivoAuthId?: string;
   plivoAuthToken?: string;
+  voiceProvider: "elevenlabs" | "plivo";
+  plivoAgentflowUrl?: string;
   googleMapsApiKey?: string;
   plivoAnswerSipUri: string;
   companyName: string;
@@ -60,6 +67,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     elevenLabsSipPhoneId: p.ELEVENLABS_SIP_PHONE_ID,
     plivoAuthId: p.PLIVO_AUTH_ID,
     plivoAuthToken: p.PLIVO_AUTH_TOKEN,
+    voiceProvider: p.VOICE_PROVIDER,
+    plivoAgentflowUrl: p.PLIVO_AGENTFLOW_URL,
     googleMapsApiKey: p.GOOGLE_MAPS_API_KEY,
     plivoAnswerSipUri: p.PLIVO_ANSWER_SIP_URI,
     companyName: p.COMPANY_NAME,
