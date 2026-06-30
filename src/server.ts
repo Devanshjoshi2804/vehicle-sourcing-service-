@@ -28,6 +28,19 @@ export function buildServer(deps: {
   geo?: GeoResolver;
 }): FastifyInstance {
   const app = Fastify({ logger: true });
+  // Some webhook providers (Plivo CX) send Content-Type: application/json with an
+  // EMPTY body and put the data in the query string instead. Default Fastify 400s
+  // on the empty body; treat empty as {} so the handler can read req.query.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    const s = (body as string)?.trim();
+    if (!s) return done(null, {});
+    try {
+      done(null, JSON.parse(s));
+    } catch (err) {
+      (err as any).statusCode = 400;
+      done(err as Error, undefined);
+    }
+  });
   // Dispatcher console is a browser SPA on another origin; the API key gates access.
   app.register(cors, { origin: true });
   app.get("/health", async () => ({ status: "ok" }));

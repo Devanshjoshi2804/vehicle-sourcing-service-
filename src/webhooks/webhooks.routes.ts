@@ -67,7 +67,9 @@ const CustomerConfirmSchema = z
 
 function secretGuard(secret: string) {
   return async (req: any, reply: any) => {
-    if (req.headers["x-webhook-secret"] !== secret) reply.code(401).send({ error: "unauthorized" });
+    // header OR ?secret= (Plivo CX query-param path)
+    const provided = req.headers["x-webhook-secret"] || req.query?.secret;
+    if (provided !== secret) reply.code(401).send({ error: "unauthorized" });
   };
 }
 
@@ -141,7 +143,10 @@ export function registerWebhookRoutes(
   });
 
   app.post("/webhooks/report-availability", { preHandler }, async (req, reply) => {
-    const parsed = ReportSchema.safeParse(req.body);
+    // Accept fields from the JSON body OR the URL query string (Plivo CX sends an
+    // empty body and puts everything in query params).
+    const merged = { ...((req.query as object) ?? {}), ...((req.body as object) ?? {}) };
+    const parsed = ReportSchema.safeParse(merged);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const b = parsed.data;
     // normalize camelCase (OVH agent) vs snake_case (Plivo CX), and infer the
