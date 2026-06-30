@@ -43,7 +43,7 @@ export type OwnerInput = {
   lanes: Lane[];
 };
 
-export type LoadStatus = "DRAFT" | "CALLING" | "CLOSED";
+export type LoadStatus = "DRAFT" | "CALLING" | "LOCKED" | "BOOKED" | "CLOSED";
 export type Load = {
   id: string;
   fromLocation: string;
@@ -110,7 +110,15 @@ export type ResolvedLocation = {
   lng: number | null;
   source: string;
 };
-export type DemandStatus = "NEW" | "REJECTED" | "APPROVED" | "SOURCING" | "CONFIRMED";
+export type DemandStatus =
+  | "NEW"
+  | "REJECTED"
+  | "SOURCING"
+  | "DRIVER_LOCKED"
+  | "CUSTOMER_PENDING"
+  | "BOOKED"
+  | "DECLINED"
+  | "CANCELLED";
 export type DemandRequest = {
   id: string;
   customerPhone: string;
@@ -123,6 +131,10 @@ export type DemandRequest = {
   pickupDate: string | null;
   status: DemandStatus;
   loadId: string | null;
+  winningOwnerId: string | null;
+  lockedPriceInr: number | null;
+  approvedAt: string | null;
+  bookedAt: string | null;
   note: string | null;
   createdAt: string;
 };
@@ -145,10 +157,24 @@ export const api = {
   followup: (id: string, ownerId: string) =>
     req<{ queued: number }>("POST", `/loads/${id}/owners/${ownerId}/followup`),
   closeLoad: (id: string) => req<{ status: string }>("POST", `/loads/${id}/close`),
-  // demand
-  listDemand: (status?: DemandStatus) =>
-    req<DemandRequest[]>("GET", `/demand${status ? `?status=${status}` : ""}`),
-  approveDemand: (id: string, body: { fixedPriceInr?: number } = {}) =>
-    req<{ loadId: string; calledOwners: number }>("POST", `/demand/${id}/approve`, body),
+  // demand — the domino
+  listDemand: (filter: { status?: DemandStatus; loadId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (filter.status) q.set("status", filter.status);
+    if (filter.loadId) q.set("loadId", filter.loadId);
+    const qs = q.toString();
+    return req<DemandRequest[]>("GET", `/demand${qs ? `?${qs}` : ""}`);
+  },
+  // step 1 (manual fallback for incomplete demands): create load + call drivers
+  approveDemand: (id: string, body: { fixedPriceInr?: number; vehicleType?: string; pickupDate?: string } = {}) =>
+    req<{ loadId: string; calledOwners: number; status: string }>("POST", `/demand/${id}/approve`, body),
   rejectDemand: (id: string) => req<{ status: string }>("POST", `/demand/${id}/reject`),
+  // step 3: company approves the locked driver's value → customer is called
+  approveDriver: (id: string) =>
+    req<{ status: string; loadId: string }>("POST", `/demand/${id}/approve-driver`),
+  // step 4 (manual): mark the customer confirmed → booked
+  bookDemand: (id: string) => req<{ status: string; loadId: string }>("POST", `/demand/${id}/book`),
+  cancelDemand: (id: string) => req<{ status: string }>("POST", `/demand/${id}/cancel`),
+  resourceDemand: (id: string) =>
+    req<{ loadId: string; calledOwners: number; status: string }>("POST", `/demand/${id}/resource`),
 };

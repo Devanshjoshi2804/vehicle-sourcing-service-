@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { Truck, Plus, MapPin, Circle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Truck, Plus, MapPin, Circle, Route, Radio } from "lucide-react";
 import { api, OwnerInput } from "../api/client";
 import { usePolling } from "../hooks/usePolling";
 import { phoneShort } from "../lib/format";
-import { Button, Chip, Empty, Eyebrow, Field, Panel } from "../components/ui";
+import { Button, Chip, Empty, Field, Panel } from "../components/ui";
 
 function parseLanes(s: string) {
   return s
@@ -45,13 +45,31 @@ export function DriversView() {
     }
   }
 
+  const stats = useMemo(() => {
+    const os = owners ?? [];
+    const lanes = new Set<string>();
+    const vehicles = new Set<string>();
+    let active = 0;
+    for (const o of os) {
+      if (o.active) active++;
+      o.lanes.forEach((l) => lanes.add(`${l.from}→${l.to}`));
+      o.vehicleTypes.forEach((v) => vehicles.add(v));
+    }
+    return { total: os.length, active, lanes: lanes.size, vehicles: vehicles.size };
+  }, [owners]);
+
   return (
     <div className="mx-auto max-w-[1100px]">
-      <div className="mb-4 flex items-center justify-between">
-        <Eyebrow>{owners?.length ?? 0} drivers on the roster</Eyebrow>
-        <Button variant="amber" onClick={() => setOpen((v) => !v)}>
-          <Plus size={14} /> Add driver
-        </Button>
+      <div className="mb-5 flex flex-wrap items-stretch gap-3">
+        <RosterStat icon={<Truck size={16} />} label="Trucks" value={stats.total} tone="brand" />
+        <RosterStat icon={<Radio size={16} />} label="Active now" value={stats.active} tone="go" live={stats.active > 0} />
+        <RosterStat icon={<Route size={16} />} label="Lanes covered" value={stats.lanes} tone="amber" />
+        <RosterStat icon={<MapPin size={16} />} label="Vehicle types" value={stats.vehicles} tone="sky" />
+        <div className="ml-auto flex items-end">
+          <Button variant="primary" onClick={() => setOpen((v) => !v)} className="!py-2.5">
+            <Plus size={14} /> Add truck
+          </Button>
+        </div>
       </div>
 
       {open && (
@@ -63,7 +81,7 @@ export function DriversView() {
             <Field label="Lanes (from > to, …)" value={form.lanes} onChange={(e) => setForm({ ...form, lanes: e.target.value })} placeholder="Mumbai > Pune" />
           </div>
           <div className="mt-3 flex items-center gap-3">
-            <Button variant="amber" onClick={add} disabled={busy || !form.name || form.phone.length < 8}>
+            <Button variant="primary" onClick={add} disabled={busy || !form.name || form.phone.length < 8}>
               {busy ? "Saving…" : "Save driver"}
             </Button>
             {err && <span className="font-mono text-[11px] text-rose">{err}</span>}
@@ -116,6 +134,45 @@ export function DriversView() {
           </div>
         )}
       </Panel>
+    </div>
+  );
+}
+
+function RosterStat({
+  icon,
+  label,
+  value,
+  tone,
+  live,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  tone: "brand" | "go" | "amber" | "sky";
+  live?: boolean;
+}) {
+  const chip: Record<string, string> = {
+    brand: "bg-brandSoft text-brand",
+    go: "bg-goSoft text-go",
+    amber: "bg-amberSoft text-amber",
+    sky: "bg-skySoft text-sky",
+  };
+  const num: Record<string, string> = {
+    brand: "text-brand",
+    go: "text-go",
+    amber: "text-amber",
+    sky: "text-sky",
+  };
+  return (
+    <div className="card flex min-w-[150px] items-center gap-3 px-4 py-3">
+      <span className={`relative grid h-9 w-9 place-items-center rounded-xl ${chip[tone]}`}>
+        {icon}
+        {live && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-go ring-2 ring-panel animate-pulse-dot" />}
+      </span>
+      <div>
+        <div className="eyebrow">{label}</div>
+        <div className={`mt-0.5 font-mono text-[22px] font-700 leading-none tnum ${num[tone]}`}>{value}</div>
+      </div>
     </div>
   );
 }

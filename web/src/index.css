@@ -3,28 +3,23 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    color-scheme: dark;
-  }
   html,
   body,
   #root {
     height: 100%;
   }
   body {
-    @apply bg-ink text-fg font-sans antialiased;
-    /* faint control-room grid */
+    @apply bg-canvas text-fg font-sans antialiased;
     background-image:
-      radial-gradient(1200px 600px at 80% -10%, rgba(255, 176, 32, 0.06), transparent 60%),
-      linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
-    background-size: 100% 100%, 44px 44px, 44px 44px;
+      radial-gradient(1000px 520px at 100% -8%, rgba(15, 118, 110, 0.10), transparent 62%),
+      radial-gradient(760px 520px at -6% 108%, rgba(224, 134, 0, 0.07), transparent 60%);
+    background-attachment: fixed;
   }
   * {
     -webkit-font-smoothing: antialiased;
   }
   ::selection {
-    background: rgba(255, 176, 32, 0.25);
+    background: rgba(15, 118, 110, 0.18);
   }
 }
 
@@ -33,21 +28,39 @@
     font-variant-numeric: tabular-nums;
   }
   .eyebrow {
-    @apply font-mono text-[10px] uppercase tracking-[0.22em] text-faint;
+    @apply font-mono text-[10px] font-600 uppercase tracking-[0.18em] text-faint;
   }
-  .panel {
-    @apply rounded-xl border border-line bg-panel/80 backdrop-blur-sm;
+  /* card with a faint top highlight + petrol-tinted depth */
+  .card {
+    @apply rounded-2xl border border-line bg-panel shadow-card;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 14%);
   }
-  .hairline {
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+  /* inputs that sit on the deep-petrol docket — translucent, light text, and a
+     dark-themed native date/number picker (color-scheme) so values stay visible */
+  .input-dark {
+    @apply w-full rounded-xl px-3 py-2.5 text-[14px] text-white transition;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color-scheme: dark;
+  }
+  .input-dark::placeholder {
+    color: rgba(255, 255, 255, 0.38);
+  }
+  .input-dark:focus {
+    outline: none;
+    border-color: rgba(224, 134, 0, 0.6);
+    background: rgba(255, 255, 255, 0.13);
+    box-shadow: 0 0 0 4px rgba(224, 134, 0, 0.14);
   }
   .scrollbar-thin::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: #222a3a;
-    border-radius: 8px;
+    background: #c4d5cf;
+    border-radius: 9px;
+    border: 2px solid transparent;
+    background-clip: content-box;
   }
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;

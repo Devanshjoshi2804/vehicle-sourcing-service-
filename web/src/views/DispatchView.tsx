@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Radar, Zap, Check, Truck, Package, Users, PhoneCall } from "lucide-react";
-import { api, Load, Owner } from "../api/client";
+import { ArrowRight, Radar, FileText, Package, Plus, X } from "lucide-react";
+import { api, CallAttempt, Load, Quote } from "../api/client";
 import { usePolling } from "../hooks/usePolling";
-import { inr, phoneShort, ago } from "../lib/format";
-import { Button, Chip, Empty, Eyebrow, Panel, Stat } from "../components/ui";
-import { CallBoard } from "../components/CallBoard";
+import { inr, ago } from "../lib/format";
+import { Button, Empty, Panel } from "../components/ui";
+import { LoadDocket, Run } from "../components/LoadDocket";
+import { TheLane } from "../components/TheLane";
+import { TheLine, resolveOutcome } from "../components/TheLine";
+import { RouteLine } from "../components/RouteLine";
 
 function todayPlus(days: number) {
   const d = new Date();
@@ -12,7 +15,9 @@ function todayPlus(days: number) {
   return d.toISOString().slice(0, 10);
 }
 
-function PostLoad({ onPosted }: { onPosted: (l: Load) => void }) {
+// "Write a load ticket" — the intake. A dispatcher fills a docket: where, what,
+// when, and the freight they'll hold. Posting it starts the sourcing run.
+function TicketForm({ onPosted, onCancel }: { onPosted: (l: Load) => void; onCancel: () => void }) {
   const [f, setF] = useState({
     fromLocation: "",
     toLocation: "",
@@ -30,141 +35,67 @@ function PostLoad({ onPosted }: { onPosted: (l: Load) => void }) {
     try {
       const load = await api.createLoad({ ...f, createdBy: "console" });
       onPosted(load);
-      setF({ ...f, fromLocation: "", toLocation: "" });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "could not post load");
+      setErr(e instanceof Error ? e.message : "Couldn't post the load. Check the fields and try again.");
     } finally {
       setBusy(false);
     }
   }
 
-  const inputCls =
-    "w-full rounded-lg border border-line bg-ink/60 px-3 py-2.5 text-[14px] text-fg placeholder:text-faint focus:border-amber/60 focus:outline-none focus:ring-1 focus:ring-amber/40";
-
   return (
-    <Panel accent="#FFB020" className="p-4">
-      <div className="flex items-center gap-2">
-        <Zap size={14} className="text-amber" />
-        <Eyebrow>Post a load — match drivers and work the line</Eyebrow>
-      </div>
-      <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_1fr_140px_140px_160px] lg:items-end">
-        <label>
-          <span className="eyebrow mb-1 block">Pickup</span>
-          <input className={inputCls} placeholder="Mumbai" value={f.fromLocation} onChange={(e) => setF({ ...f, fromLocation: e.target.value })} />
-        </label>
-        <div className="hidden pb-2.5 lg:block">
-          <ArrowRight size={18} className="text-amber" />
+    <section className="relative overflow-hidden rounded-2xl shadow-hero">
+      <div className="absolute inset-0 bg-gradient-to-br from-deep via-deep2 to-deep" />
+      <div className="relative px-6 py-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText size={14} className="text-amber" />
+            <span className="font-mono text-[10px] font-600 uppercase tracking-[0.22em] text-white/55">
+              New load ticket
+            </span>
+          </div>
+          <button onClick={onCancel} className="text-white/40 transition hover:text-white/80" aria-label="Cancel">
+            <X size={16} />
+          </button>
         </div>
-        <label>
-          <span className="eyebrow mb-1 block">Drop</span>
-          <input className={inputCls} placeholder="Pune" value={f.toLocation} onChange={(e) => setF({ ...f, toLocation: e.target.value })} />
-        </label>
-        <label>
-          <span className="eyebrow mb-1 block">Vehicle</span>
-          <input className={inputCls} value={f.vehicleType} onChange={(e) => setF({ ...f, vehicleType: e.target.value })} />
-        </label>
-        <label>
-          <span className="eyebrow mb-1 block">Pickup date</span>
-          <input type="date" className={`${inputCls} tnum`} value={f.pickupDate} onChange={(e) => setF({ ...f, pickupDate: e.target.value })} />
-        </label>
-        <label>
-          <span className="eyebrow mb-1 block">Fixed price ₹</span>
-          <input type="number" className={`${inputCls} font-mono tnum`} value={f.fixedPriceInr || ""} onChange={(e) => setF({ ...f, fixedPriceInr: Number(e.target.value) })} />
-        </label>
+
+        <div className="mt-4 grid grid-cols-1 items-end gap-3 lg:grid-cols-[1fr_auto_1fr_120px_150px_150px]">
+          <Lbl t="Pickup">
+            <input className="input-dark" placeholder="Mumbai" value={f.fromLocation} onChange={(e) => setF({ ...f, fromLocation: e.target.value })} />
+          </Lbl>
+          <div className="hidden pb-3 lg:block">
+            <ArrowRight size={18} className="text-amber" />
+          </div>
+          <Lbl t="Drop">
+            <input className="input-dark" placeholder="Pune" value={f.toLocation} onChange={(e) => setF({ ...f, toLocation: e.target.value })} />
+          </Lbl>
+          <Lbl t="Vehicle">
+            <input className="input-dark" value={f.vehicleType} onChange={(e) => setF({ ...f, vehicleType: e.target.value })} />
+          </Lbl>
+          <Lbl t="Pickup date">
+            <input type="date" className="input-dark tnum" value={f.pickupDate} onChange={(e) => setF({ ...f, pickupDate: e.target.value })} />
+          </Lbl>
+          <Lbl t="Fixed freight ₹">
+            <input type="number" className="input-dark font-mono tnum" value={f.fixedPriceInr || ""} onChange={(e) => setF({ ...f, fixedPriceInr: Number(e.target.value) })} />
+          </Lbl>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <Button variant="amber" onClick={post} disabled={busy || !ready}>
+            <Radar size={15} /> {busy ? "Posting…" : "Post load & source trucks"}
+          </Button>
+          {err && <span className="font-mono text-[11px] text-rose-200">{err}</span>}
+        </div>
       </div>
-      <div className="mt-3 flex items-center gap-3">
-        <Button variant="amber" onClick={post} disabled={busy || !ready}>
-          <Radar size={14} /> {busy ? "Posting…" : "Post load"}
-        </Button>
-        {err && <span className="font-mono text-[11px] text-rose">{err}</span>}
-      </div>
-    </Panel>
+    </section>
   );
 }
 
-function MatchPanel({
-  load,
-  owners,
-  calledOwnerIds,
-  onFired,
-}: {
-  load: Load;
-  owners: Owner[];
-  calledOwnerIds: Set<string>;
-  onFired: () => void;
-}) {
-  const { data: suggestions } = usePolling(() => api.suggestedOwners(load.id), 10000, [load.id]);
-  const [sel, setSel] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    // preselect matches that haven't been called yet
-    if (suggestions) {
-      setSel(new Set(suggestions.map((s) => s.owner.id).filter((id) => !calledOwnerIds.has(id))));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestions?.length]);
-
-  async function fire() {
-    if (sel.size === 0) return;
-    setBusy(true);
-    try {
-      await api.fireCalls(load.id, [...sel]);
-      onFired();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const toggle = (id: string) =>
-    setSel((s) => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-
+function Lbl({ t, children }: { t: string; children: React.ReactNode }) {
   return (
-    <Panel
-      title="Matched drivers"
-      right={
-        <Button variant="amber" onClick={fire} disabled={busy || sel.size === 0} className="!py-1.5 !text-[12px]">
-          <PhoneCall size={13} /> {busy ? "Calling…" : `Start calls · ${sel.size}`}
-        </Button>
-      }
-    >
-      <div className="max-h-[280px] overflow-y-auto scrollbar-thin">
-        {!suggestions || suggestions.length === 0 ? (
-          <Empty icon={<Users size={26} />} title="No matching drivers" hint="Add drivers whose lane and vehicle type fit this load — the matcher ranks them here." />
-        ) : (
-          suggestions.map(({ owner, score }) => {
-            const called = calledOwnerIds.has(owner.id);
-            const on = sel.has(owner.id);
-            return (
-              <button
-                key={owner.id}
-                onClick={() => toggle(owner.id)}
-                className="flex w-full items-center gap-3 border-b border-line/70 px-4 py-2.5 text-left transition-colors hover:bg-panel2/40"
-              >
-                <span className={`grid h-4 w-4 place-items-center rounded border ${on ? "border-amber bg-amber text-ink" : "border-line2"}`}>
-                  {on && <Check size={11} strokeWidth={3} />}
-                </span>
-                <span className="flex-1">
-                  <span className="text-[13px] font-600 text-fg">{owner.name}</span>
-                  <span className="ml-2 font-mono text-[11px] tnum text-muted">{phoneShort(owner.phone)}</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  {owner.vehicleTypes.slice(0, 2).map((v) => <Chip key={v} color="muted">{v}</Chip>)}
-                </span>
-                {called && <Chip color="amber" dot>called</Chip>}
-                <span className="w-10 text-right font-mono text-[11px] tnum text-faint" title="match score">
-                  {"★".repeat(Math.min(score, 3))}
-                </span>
-              </button>
-            );
-          })
-        )}
-      </div>
-    </Panel>
+    <label className="block">
+      <span className="mb-1 block font-mono text-[10px] font-600 uppercase tracking-[0.14em] text-white/45">{t}</span>
+      {children}
+    </label>
   );
 }
 
@@ -172,15 +103,14 @@ export function DispatchView() {
   const { data: loads, refresh: refreshLoads } = usePolling(() => api.listLoads(), 5000, []);
   const { data: owners } = usePolling(() => api.listOwners(), 8000, []);
   const [selId, setSelId] = useState<string | null>(null);
+  const [writing, setWriting] = useState(false);
 
-  // auto-select newest load if none chosen
   useEffect(() => {
-    if (!selId && loads && loads.length) setSelId(loads[0].id);
-  }, [loads, selId]);
+    if (!selId && !writing && loads && loads.length) setSelId(loads[0].id);
+  }, [loads, selId, writing]);
 
   const selected = loads?.find((l) => l.id === selId) ?? null;
 
-  // live polling for the selected load's calls + quotes
   const { data: calls, refresh: refreshCalls } = usePolling(
     () => (selId ? api.loadCalls(selId) : Promise.resolve([])),
     2500,
@@ -193,77 +123,106 @@ export function DispatchView() {
     [selId],
     !!selId,
   );
+  // A demand-sourced load carries a customer demand whose stage drives the rest
+  // of the domino (approve → confirm → book). null for dispatcher-posted loads.
+  const { data: demandList } = usePolling(
+    () => (selId ? api.listDemand({ loadId: selId }) : Promise.resolve([])),
+    3000,
+    [selId],
+    !!selId,
+  );
+  const demand = demandList?.[0] ?? null;
 
   const calledOwnerIds = useMemo(() => new Set((calls ?? []).map((c) => c.ownerId)), [calls]);
+  const ownerById = useMemo(() => new Map((owners ?? []).map((o) => [o.id, o])), [owners]);
 
-  const kpi = useMemo(() => {
-    const all = loads ?? [];
-    const q = quotes ?? [];
-    return {
-      drivers: owners?.length ?? 0,
-      loads: all.length,
-      calling: all.filter((l) => l.status === "CALLING").length,
-      accepted: q.filter((x) => x.available === "YES" && x.acceptsFixed).length,
-    };
-  }, [loads, owners, quotes]);
+  const run: Run = useMemo(() => {
+    const cs = calls ?? [];
+    const qs = quotes ?? [];
+    const quoteFor = (c: CallAttempt) =>
+      qs.filter((q) => q.callAttemptId === c.id || (c.elConversationId && q.elConversationId === c.elConversationId)).slice(-1)[0];
+    const latest = new Map<string, CallAttempt>();
+    for (const c of cs) {
+      const p = latest.get(c.ownerId);
+      if (!p || new Date(c.createdAt) >= new Date(p.createdAt)) latest.set(c.ownerId, c);
+    }
+    const r: Run = { called: latest.size, dialing: 0, onCall: 0, holding: 0, accepted: 0, declined: 0 };
+    for (const c of latest.values()) {
+      const o = resolveOutcome(c, quoteFor(c));
+      if (o === "DIALING") r.dialing++;
+      else if (o === "ON_CALL") r.onCall++;
+      else if (o === "COUNTER") r.holding++;
+      else if (o === "DECLINED") r.declined++;
+      else if (o === "ACCEPTED") {
+        r.accepted++;
+        r.winner = r.winner ?? ownerById.get(c.ownerId)?.name;
+      }
+    }
+    return r;
+  }, [calls, quotes, ownerById]);
+
+  const locked = run.accepted > 0 || selected?.status === "LOCKED" || selected?.status === "BOOKED";
 
   async function followup(ownerId: string) {
     if (!selId) return;
     await api.followup(selId, ownerId);
     refreshCalls();
   }
+  async function closeLoad() {
+    if (!selId) return;
+    await api.closeLoad(selId);
+    refreshLoads();
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* KPI strip */}
-      <div className="grid grid-cols-2 divide-x divide-line rounded-xl border border-line bg-panel/60 sm:grid-cols-4">
-        <Stat label="Drivers" value={kpi.drivers} />
-        <Stat label="Loads" value={kpi.loads} />
-        <Stat label="On air" value={kpi.calling} tone="amber" />
-        <Stat label="Accepted" value={kpi.accepted} tone="go" />
-      </div>
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[256px_1fr]">
+      {/* the tray — load tickets waiting and in flight */}
+      <div className="flex flex-col gap-3">
+        <Button
+          variant="primary"
+          onClick={() => {
+            setWriting(true);
+            setSelId(null);
+          }}
+          className="w-full !py-3"
+        >
+          <Plus size={15} /> Write a load ticket
+        </Button>
 
-      <PostLoad
-        onPosted={(l) => {
-          setSelId(l.id);
-          refreshLoads();
-        }}
-      />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_1fr]">
-        {/* loads list */}
-        <Panel title="Loads" className="self-start">
-          <div className="max-h-[520px] overflow-y-auto scrollbar-thin">
+        <Panel title="Load tray" className="self-start">
+          <div className="max-h-[640px] overflow-y-auto scrollbar-thin">
             {!loads || loads.length === 0 ? (
-              <Empty icon={<Package size={26} />} title="No loads yet" hint="Post a load above to start sourcing vehicles." />
+              <Empty icon={<Package size={20} />} title="Tray is empty" hint="Write your first load ticket to start sourcing trucks." />
             ) : (
               loads.map((l) => {
                 const on = l.id === selId;
+                const calling = l.status === "CALLING";
                 return (
                   <button
                     key={l.id}
-                    onClick={() => setSelId(l.id)}
-                    className={`relative flex w-full flex-col gap-1 border-b border-line/70 px-4 py-3 text-left transition-colors ${on ? "bg-panel2/60" : "hover:bg-panel2/40"}`}
+                    onClick={() => {
+                      setSelId(l.id);
+                      setWriting(false);
+                    }}
+                    className={`relative block w-full border-b border-line px-4 py-3.5 text-left transition-colors last:border-b-0 ${
+                      on ? "bg-brandSoft/60" : "hover:bg-panel2"
+                    }`}
                   >
-                    {on && <span className="absolute left-0 top-0 h-full w-[3px] bg-amber" />}
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 font-display text-[14px] font-700 text-fg">
-                        {l.fromLocation}
-                        <ArrowRight size={13} className="text-amber" />
-                        {l.toLocation}
-                      </span>
-                      <Chip
-                        color={l.status === "CALLING" ? "amber" : l.status === "CLOSED" ? "muted" : "cyan"}
-                        dot
-                        pulse={l.status === "CALLING"}
-                      >
-                        {l.status}
-                      </Chip>
-                    </div>
-                    <div className="flex items-center gap-2 font-mono text-[11px] tnum text-muted">
-                      <span className="flex items-center gap-1"><Truck size={11} className="text-faint" />{l.vehicleType}</span>
+                    {on && <span className="absolute left-0 top-0 h-full w-[3px] bg-brand" />}
+                    <RouteLine from={l.fromLocation} to={l.toLocation} active={calling} />
+                    <div className="mt-2 flex items-center justify-between font-mono text-[11px] tnum">
                       <span className="text-go">{inr(l.fixedPriceInr)}</span>
-                      <span className="text-faint">· {ago(l.createdAt)}</span>
+                      <span
+                        className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[9px] font-700 uppercase tracking-[0.1em] ${
+                          calling ? "bg-amberSoft text-amber" : l.status === "CLOSED" ? "bg-panel2 text-faint" : "bg-skySoft text-sky"
+                        }`}
+                      >
+                        {calling && <span className="h-1.5 w-1.5 rounded-full bg-amber animate-pulse-dot" />}
+                        {l.status}
+                      </span>
+                    </div>
+                    <div className="mt-1 font-mono text-[10px] text-faint">
+                      {l.vehicleType} · {ago(l.createdAt)} ago
                     </div>
                   </button>
                 );
@@ -271,22 +230,44 @@ export function DispatchView() {
             )}
           </div>
         </Panel>
+      </div>
 
-        {/* selected load workspace */}
-        <div className="flex min-h-[520px] flex-col gap-4">
-          {!selected ? (
-            <Panel className="flex-1">
-              <Empty icon={<Radar size={28} />} title="Select a load" hint="Pick a load on the left, or post a new one to begin sourcing." />
-            </Panel>
-          ) : (
-            <>
-              <MatchPanel load={selected} owners={owners ?? []} calledOwnerIds={calledOwnerIds} onFired={refreshCalls} />
-              <div className="min-h-[320px] flex-1">
-                <CallBoard load={selected} calls={calls ?? []} quotes={quotes ?? []} owners={owners ?? []} onFollowup={followup} />
-              </div>
-            </>
-          )}
-        </div>
+      {/* the desk */}
+      <div className="flex min-w-0 flex-col gap-5">
+        {writing ? (
+          <TicketForm
+            onPosted={(l) => {
+              setWriting(false);
+              setSelId(l.id);
+              refreshLoads();
+            }}
+            onCancel={() => setWriting(false)}
+          />
+        ) : !selected ? (
+          <Panel className="min-h-[480px]">
+            <Empty
+              icon={<Radar size={26} />}
+              title="No load on the desk"
+              hint="Pick a ticket from the tray, or write a new one to start sourcing a truck."
+            />
+          </Panel>
+        ) : (
+          <>
+            <LoadDocket load={selected} run={run} locked={locked} />
+            <div className="grid min-h-[440px] grid-cols-1 gap-5 xl:grid-cols-[minmax(290px,380px)_1fr]">
+              <TheLane load={selected} calledOwnerIds={calledOwnerIds} onFired={refreshCalls} />
+              <TheLine
+                load={selected}
+                calls={calls ?? []}
+                quotes={quotes ?? []}
+                owners={owners ?? []}
+                demandStatus={demand?.status ?? null}
+                onFollowup={followup}
+                onClose={closeLoad}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
