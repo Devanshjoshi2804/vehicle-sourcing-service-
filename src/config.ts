@@ -13,11 +13,17 @@ const schema = z.object({
   ELEVENLABS_SIP_PHONE_ID: z.string().min(1),
   PLIVO_AUTH_ID: z.string().optional(),
   PLIVO_AUTH_TOKEN: z.string().optional(),
-  // Which provider places outbound driver calls: ElevenLabs SIP (legacy, fails
-  // India anchoring) or Plivo CX AgentFlow (India-hosted media — works domestically).
-  VOICE_PROVIDER: z.enum(["elevenlabs", "plivo"]).default("elevenlabs"),
+  // Who places outbound driver calls:
+  //   elevenlabs   — EL SIP (legacy, fails India anchoring)
+  //   plivo        — Plivo CX AgentFlow (no-code; its trial gates live-call audio)
+  //   plivo_native — Plivo Call API → our own OVH voice agent (full control, works)
+  VOICE_PROVIDER: z.enum(["elevenlabs", "plivo", "plivo_native"]).default("elevenlabs"),
   // The Plivo AgentFlow trigger URL (POST starts an outbound call with our vars).
   PLIVO_AGENTFLOW_URL: z.string().optional(),
+  // plivo_native: the Caller ID to dial from, and the public base URL of our voice
+  // agent whose /answer-outbound runs the driver-offer conversation.
+  PLIVO_CALLER_ID: z.string().optional(),
+  VOICE_AGENT_BASE: z.string().optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
   // SIP URI the Plivo Answer-URL bridges inbound PSTN calls to (the EL agent).
   PLIVO_ANSWER_SIP_URI: z
@@ -43,8 +49,10 @@ export type Config = {
   elevenLabsSipPhoneId: string;
   plivoAuthId?: string;
   plivoAuthToken?: string;
-  voiceProvider: "elevenlabs" | "plivo";
+  voiceProvider: "elevenlabs" | "plivo" | "plivo_native";
   plivoAgentflowUrl?: string;
+  plivoCallerId?: string;
+  voiceAgentBase?: string;
   googleMapsApiKey?: string;
   plivoAnswerSipUri: string;
   companyName: string;
@@ -69,6 +77,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     plivoAuthToken: p.PLIVO_AUTH_TOKEN,
     voiceProvider: p.VOICE_PROVIDER,
     plivoAgentflowUrl: p.PLIVO_AGENTFLOW_URL,
+    plivoCallerId: p.PLIVO_CALLER_ID,
+    voiceAgentBase: p.VOICE_AGENT_BASE,
     googleMapsApiKey: p.GOOGLE_MAPS_API_KEY,
     plivoAnswerSipUri: p.PLIVO_ANSWER_SIP_URI,
     companyName: p.COMPANY_NAME,

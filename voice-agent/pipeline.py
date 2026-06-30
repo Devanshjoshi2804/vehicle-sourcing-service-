@@ -71,11 +71,60 @@ TOOLS = [
     }
 ]
 
+# ---- OUTBOUND: calling a vehicle owner to offer a load at a fixed price ----
+OFFER_PROMPT = (
+    "You are Priya, a warm, polite female voice agent for {company}. You are CALLING a vehicle "
+    "owner named {owner_name} to offer them a load. Speak ONLY in short, natural Hindi/Hinglish, "
+    "one sentence per turn, like a real phone call.\n"
+    "\n"
+    "The load: {frm} se {to}, {vehicle_type} gaadi, fixed rate {fixed_price} rupaye. "
+    "This price is FINAL — you must NOT negotiate.\n"
+    "\n"
+    "Your only goal: find out whether {owner_name} will take THIS load at {fixed_price} rupaye, "
+    "then call report_availability and end the call.\n"
+    "\n"
+    "RULES:\n"
+    "- YOU speak first (you already greeted with the offer). Wait for their reply; never talk over them.\n"
+    "- Do NOT negotiate. If they ask for more money, say politely it is a fixed-price load, note the "
+    "number they asked, and close.\n"
+    "- If unclear or noisy, ask once to repeat. NEVER guess.\n"
+    "- Keep every reply to one short sentence.\n"
+    "\n"
+    "Decide ONE outcome and pass it to report_availability:\n"
+    "- Yes at the fixed price: available=YES, acceptsFixed=true.\n"
+    "- Available but wants more money: available=YES, acceptsFixed=false, quotedPriceInr=<their number>.\n"
+    "- Not available / not interested: available=NO.\n"
+    "- Busy / call later: available=CALLBACK.\n"
+    "After report_availability returns, say a short Hindi closing (e.g. 'Dhanyavaad!') and stop."
+)
+
+OFFER_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "report_availability",
+            "description": "Report whether the owner takes the load at the fixed price. Call once, when decided.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "available": {"type": "string", "enum": ["YES", "NO", "CALLBACK"]},
+                    "acceptsFixed": {"type": "boolean", "description": "True only if they take the FIXED price."},
+                    "quotedPriceInr": {"type": "integer", "description": "Rupees they asked for, if they wanted more."},
+                    "note": {"type": "string", "description": "Short summary of the outcome."},
+                },
+                "required": ["available"],
+            },
+        },
+    }
+]
+
 
 class Call:
-    def __init__(self, ws, from_number: str):
+    def __init__(self, ws, from_number: str, mode: str = "intake", ctx: dict | None = None):
         self.ws = ws
         self.from_number = from_number or "unknown"
+        self.mode = mode  # "intake" (inbound customer) | "offer" (outbound driver)
+        self.ctx = ctx or {}
         self.stream_id = ""
         self.vad = webrtcvad.Vad(3)  # most aggressive — filter telephony noise
         self.pcm_buf = b""
@@ -84,7 +133,20 @@ class Call:
         self.silence_frames = 0
         self.speaking = False
         self.done = False
-        self.messages = [{"role": "system", "content": SYSTEM_PROMPT.format(company=CFG.company)}]
+        if mode == "offer":
+            system = OFFER_PROMPT.format(
+                company=CFG.company,
+                owner_name=self.ctx.get("owner") or "ji",
+                frm=self.ctx.get("frm") or "",
+                to=self.ctx.get("to") or "",
+                vehicle_type=self.ctx.get("vt") or "",
+                fixed_price=self.ctx.get("price") or "",
+            )
+            self.tools = OFFER_TOOLS
+        else:
+            system = SYSTEM_PROMPT.format(company=CFG.company)
+            self.tools = TOOLS
+        self.messages = [{"role": "system", "content": system}]
 
     # ---- audio out ----
     async def play(self, ulaw: bytes):
@@ -118,9 +180,27 @@ class Call:
             self.speaking = False
 
     async def greet(self):
-        await self.say(
-            f"Namaste, {CFG.company} se baat ho rahi hai. Bataiye, kaisi gaadi chahiye aur kahan se kahan jaani hai?"
-        )
+        if self.mode == "offer":
+            owner = self.ctx.get("owner") or "ji"
+            frm = self.ctx.get("frm") or ""
+            to = self.ctx.get("to") or ""
+            vt = self.ctx.get("vt") or ""
+            price = self.ctx.get("price") or ""
+            if self.ctx.get("flow") == "fixed_price_followup":
+                line = (
+                    f"Namaste {owner} ji, {CFG.company} se phir baat ho rahi hai. {frm} se {to} wale "
+                    f"load ke liye hum {price} rupaye fixed hi de sakte hain — kya aap is final price par haan karenge?"
+                )
+            else:
+                line = (
+                    f"Namaste {owner} ji, {CFG.company} se baat ho rahi hai. Ek load hai {frm} se {to}, "
+                    f"{vt} gaadi, fixed rate {price} rupaye. Kya aap yeh load is rate par le sakte hain?"
+                )
+            await self.say(line)
+        else:
+            await self.say(
+                f"Namaste, {CFG.company} se baat ho rahi hai. Bataiye, kaisi gaadi chahiye aur kahan se kahan jaani hai?"
+            )
 
     # ---- audio in ----
     async def on_media(self, payload_b64: str):
@@ -161,28 +241,35 @@ class Call:
         await self.respond()
 
     async def respond(self):
-        resp = await groq.chat(self.messages, TOOLS)
+        resp = await groq.chat(self.messages, self.tools)
         msg = resp["choices"][0]["message"]
         self.messages.append(msg)
         tool_calls = msg.get("tool_calls")
         if tool_calls:
             for tc in tool_calls:
-                if tc["function"]["name"] == "report_demand":
-                    try:
-                        args = json.loads(tc["function"]["arguments"] or "{}")
-                    except Exception:
-                        args = {}
+                name = tc["function"]["name"]
+                try:
+                    args = json.loads(tc["function"]["arguments"] or "{}")
+                except Exception:
+                    args = {}
+                if name == "report_demand":
                     result = await self.report_demand(args)
-                    print(f"[demand] {args} -> {result}", flush=True)
-                    self.messages.append(
-                        {"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result)}
-                    )
-            resp2 = await groq.chat(self.messages, TOOLS)
+                elif name == "report_availability":
+                    result = await self.report_availability(args)
+                else:
+                    result = {"ok": False, "error": f"unknown tool {name}"}
+                print(f"[{name}] {args} -> {result}", flush=True)
+                self.messages.append(
+                    {"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result)}
+                )
+            resp2 = await groq.chat(self.messages, self.tools)
             final = resp2["choices"][0]["message"]
-            await self.say(
-                final.get("content")
-                or "Theek hai, aapki request note kar li hai, hum 2 minute mein call back karenge. Dhanyavaad."
+            default_close = (
+                "Theek hai, dhanyavaad!"
+                if self.mode == "offer"
+                else "Theek hai, aapki request note kar li hai, hum 2 minute mein call back karenge. Dhanyavaad."
             )
+            await self.say(final.get("content") or default_close)
             self.done = True
             await asyncio.sleep(0.3)
             try:
@@ -208,6 +295,28 @@ class Call:
             async with httpx.AsyncClient(timeout=15) as c:
                 r = await c.post(
                     f"{CFG.backend_base}/webhooks/report-demand",
+                    headers={"x-webhook-secret": CFG.webhook_secret},
+                    json=body,
+                )
+                return {"ok": r.status_code in (200, 201), "status": r.status_code}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    async def report_availability(self, args: dict) -> dict:
+        # conversationId is the id the backend generated and passed in on the
+        # answer URL — so this report matches the right call_attempt.
+        body = {
+            "conversationId": self.ctx.get("cid") or self.stream_id or f"voice_{self.from_number}",
+            "available": (args.get("available") or "CALLBACK").upper(),
+            "acceptsFixed": args.get("acceptsFixed"),
+            "quotedPriceInr": args.get("quotedPriceInr"),
+            "vehicleType": self.ctx.get("vt"),
+            "note": args.get("note"),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.post(
+                    f"{CFG.backend_base}/webhooks/report-availability",
                     headers={"x-webhook-secret": CFG.webhook_secret},
                     json=body,
                 )

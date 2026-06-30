@@ -9,6 +9,7 @@ import { registerLoadRoutes } from "./loads/loads.routes.js";
 import { CallsRepo } from "./calls/calls.repo.js";
 import { buildElevenLabsClient, ElevenLabsClient } from "./calls/elevenlabs.client.js";
 import { buildPlivoCxClient } from "./calls/plivo-cx.client.js";
+import { buildPlivoNativeClient } from "./calls/plivo-native.client.js";
 import { CallOrchestrator } from "./calls/orchestrator.js";
 import { registerCallRoutes } from "./calls/calls.routes.js";
 import { QuotesRepo } from "./quotes/quotes.repo.js";
@@ -38,9 +39,11 @@ export function buildServer(deps: {
   const callsRepo = new CallsRepo(deps.pool);
   const el =
     deps.el ??
-    (deps.config.voiceProvider === "plivo"
-      ? buildPlivoCxClient(deps.config)
-      : buildElevenLabsClient(deps.config));
+    (deps.config.voiceProvider === "plivo_native"
+      ? buildPlivoNativeClient(deps.config)
+      : deps.config.voiceProvider === "plivo"
+        ? buildPlivoCxClient(deps.config)
+        : buildElevenLabsClient(deps.config));
   const orchestrator = new CallOrchestrator({
     pool: deps.pool,
     config: deps.config,
