@@ -26,9 +26,10 @@ const ReportSchema = z
   .object({
     conversationId: z.string().min(1).optional(),
     conversation_id: z.string().min(1).optional(), // Plivo CX
-    available: z.enum(["YES", "NO", "CALLBACK"]),
+    available: z.enum(["YES", "NO", "CALLBACK"]).optional(), // inferred if absent
     quotedPriceInr: intish,
     quoted_price_inr: intish,
+    quoted_price: intish, // Plivo CX field name
     acceptsFixed: boolish,
     accepts_fixed: boolish,
     vehicleType: z.string().nullable().optional(),
@@ -143,10 +144,18 @@ export function registerWebhookRoutes(
     const parsed = ReportSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const b = parsed.data;
-    // normalize camelCase (OVH agent) vs snake_case (Plivo CX)
+    // normalize camelCase (OVH agent) vs snake_case (Plivo CX), and infer the
+    // fields Plivo's report node omits.
     const cid = (b.conversationId || b.conversation_id)!;
-    const quotedPriceInr = b.quotedPriceInr ?? b.quoted_price_inr ?? null;
-    const acceptsFixed = b.acceptsFixed ?? b.accepts_fixed ?? null;
+    const quotedPriceInr = b.quotedPriceInr ?? b.quoted_price_inr ?? b.quoted_price ?? null;
+    const availableProvided = b.available != null;
+    const available = b.available ?? "YES"; // node usually only reports when there's an answer
+    let acceptsFixed = b.acceptsFixed ?? b.accepts_fixed ?? null;
+    if (acceptsFixed === null) {
+      // a quoted price means they countered; an explicit YES with no counter means accept.
+      if (quotedPriceInr != null) acceptsFixed = false;
+      else if (availableProvided && available === "YES") acceptsFixed = true;
+    }
     const call = await deps.callsRepo.findByConversationId(cid);
     if (!call) return reply.code(404).send({ error: "unknown conversation" });
 
@@ -155,7 +164,7 @@ export function registerWebhookRoutes(
       ownerId: call.ownerId,
       callAttemptId: call.id,
       elConversationId: cid,
-      available: b.available,
+      available,
       quotedPriceInr,
       acceptsFixed,
       vehicleType: b.vehicleType ?? null,
@@ -163,14 +172,14 @@ export function registerWebhookRoutes(
     });
 
     // Auto follow-up: owner is available but won't take the fixed price, and this was the first offer.
-    if (created && call.flow === "offer" && b.available === "YES" && acceptsFixed === false) {
+    if (created && call.flow === "offer" && available === "YES" && acceptsFixed === false) {
       await deps.orchestrator.enqueue(call.loadId, [call.ownerId], "fixed_price_followup");
     }
 
     // Domino step 2 — first driver to ACCEPT the fixed price locks the load. We
     // record the winner, stop dialing everyone else, and stop here: the customer
     // is NOT called yet — the company approves the value first (see /approve-driver).
-    if (created && b.available === "YES" && acceptsFixed === true) {
+    if (created && available === "YES" && acceptsFixed === true) {
       const load = await deps.loadsRepo.getLoad(call.loadId);
       const demand = await deps.demandRepo.findByLoadId(call.loadId);
       if (demand) {
