@@ -22,7 +22,7 @@ const PostCallSchema = z.object({
 // Lenient on purpose — voice transcripts (and dashboard tests) are messy:
 // caller id can be absent, price may arrive as a string, date as "kal".
 const ReportDemandSchema = z.object({
-  conversationId: z.string().min(1),
+  conversationId: z.string().optional(), // some providers (e.g. Bolna) don't send one
   customerPhone: z.string().optional(),
   fromText: z.string().min(1),
   toText: z.string().min(1),
@@ -75,7 +75,8 @@ export function registerWebhookRoutes(
       vehicleType: b.vehicleType ?? null,
       offeredPriceInr: b.offeredPriceInr ?? null,
       pickupDate: isoDate,
-      elConversationId: b.conversationId,
+      elConversationId:
+        b.conversationId || `ext_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
       note,
     });
     return reply.code(created ? 201 : 200).send({ created, demandId: demand.id });
