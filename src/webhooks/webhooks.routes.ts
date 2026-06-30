@@ -9,14 +9,25 @@ import { OwnersRepo } from "../owners/owners.repo.js";
 import { GeoResolver } from "../geo/geo.js";
 import { sourceDemand } from "../demand/sourcing.js";
 
-const ReportSchema = z.object({
-  conversationId: z.string().min(1),
-  available: z.enum(["YES", "NO", "CALLBACK"]),
-  quotedPriceInr: z.number().int().nullable().optional(),
-  acceptsFixed: z.boolean().nullable().optional(),
-  vehicleType: z.string().nullable().optional(),
-  note: z.string().nullable().optional(),
-});
+// Tolerant on field naming/types: our OVH agent sends camelCase, Plivo CX sends
+// snake_case (conversation_id) and may stringify the price / boolean.
+const boolish = z.preprocess(
+  (v) => (typeof v === "string" ? ["true", "yes", "1"].includes(v.toLowerCase()) : v),
+  z.boolean().nullable().optional(),
+);
+const ReportSchema = z
+  .object({
+    conversationId: z.string().min(1).optional(),
+    conversation_id: z.string().min(1).optional(), // Plivo CX
+    available: z.enum(["YES", "NO", "CALLBACK"]),
+    quotedPriceInr: z.coerce.number().int().nullable().optional(),
+    quoted_price_inr: z.coerce.number().int().nullable().optional(),
+    acceptsFixed: boolish,
+    accepts_fixed: boolish,
+    vehicleType: z.string().nullable().optional(),
+    note: z.string().nullable().optional(),
+  })
+  .refine((b) => b.conversationId || b.conversation_id, { message: "conversationId required" });
 const PostCallSchema = z.object({
   conversationId: z.string().min(1),
   transcript: z.string().default(""),
@@ -125,37 +136,41 @@ export function registerWebhookRoutes(
     const parsed = ReportSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const b = parsed.data;
-    const call = await deps.callsRepo.findByConversationId(b.conversationId);
+    // normalize camelCase (OVH agent) vs snake_case (Plivo CX)
+    const cid = (b.conversationId || b.conversation_id)!;
+    const quotedPriceInr = b.quotedPriceInr ?? b.quoted_price_inr ?? null;
+    const acceptsFixed = b.acceptsFixed ?? b.accepts_fixed ?? null;
+    const call = await deps.callsRepo.findByConversationId(cid);
     if (!call) return reply.code(404).send({ error: "unknown conversation" });
 
     const { created } = await deps.quotesRepo.upsertByConversation({
       loadId: call.loadId,
       ownerId: call.ownerId,
       callAttemptId: call.id,
-      elConversationId: b.conversationId,
+      elConversationId: cid,
       available: b.available,
-      quotedPriceInr: b.quotedPriceInr ?? null,
-      acceptsFixed: b.acceptsFixed ?? null,
+      quotedPriceInr,
+      acceptsFixed,
       vehicleType: b.vehicleType ?? null,
       note: b.note ?? null,
     });
 
     // Auto follow-up: owner is available but won't take the fixed price, and this was the first offer.
-    if (created && call.flow === "offer" && b.available === "YES" && b.acceptsFixed === false) {
+    if (created && call.flow === "offer" && b.available === "YES" && acceptsFixed === false) {
       await deps.orchestrator.enqueue(call.loadId, [call.ownerId], "fixed_price_followup");
     }
 
     // Domino step 2 — first driver to ACCEPT the fixed price locks the load. We
     // record the winner, stop dialing everyone else, and stop here: the customer
     // is NOT called yet — the company approves the value first (see /approve-driver).
-    if (created && b.available === "YES" && b.acceptsFixed === true) {
+    if (created && b.available === "YES" && acceptsFixed === true) {
       const load = await deps.loadsRepo.getLoad(call.loadId);
       const demand = await deps.demandRepo.findByLoadId(call.loadId);
       if (demand) {
         const locked = await deps.demandRepo.lockDriver(
           call.loadId,
           call.ownerId,
-          load?.fixedPriceInr ?? b.quotedPriceInr ?? 0,
+          load?.fixedPriceInr ?? quotedPriceInr ?? 0,
         );
         if (locked) {
           await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
