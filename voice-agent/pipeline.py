@@ -54,9 +54,11 @@ SYSTEM_PROMPT = (
     "- Once you have BOTH pickup and drop, confirm them once: 'मुंबई से दिल्ली, सही है?'.\n"
     "- Do NOT negotiate the price.\n"
     "\n"
-    "When you have ALL FIVE and the locations are confirmed, CALL report_demand, then say exactly: "
-    "'Theek hai, aapki request note kar li hai, hum 2 minute mein call back karenge. Dhanyavaad.' "
-    "and stop."
+    "When you have ALL FIVE and the locations are confirmed, CALL report_demand. IMPORTANT — although "
+    "you SPEAK in Devanagari Hindi, the report_demand fields must be written in ENGLISH so our system "
+    "can match drivers: fromText/toText as English city names (Mumbai, Pune, Bengaluru, Delhi), and "
+    "vehicleType as a number+ft with no spaces (16ft, 20ft, 32ft). Then say exactly: "
+    "'ठीक है, आपकी रिक्वेस्ट नोट कर ली है, हम 2 मिनट में कॉल बैक करेंगे। धन्यवाद।' and stop."
 )
 
 TOOLS = [
@@ -68,9 +70,9 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "fromText": {"type": "string", "description": "Pickup location as said (area + city)."},
-                    "toText": {"type": "string", "description": "Drop location as said (area + city)."},
-                    "vehicleType": {"type": "string", "description": "Vehicle type e.g. 16ft."},
+                    "fromText": {"type": "string", "description": "Pickup city in ENGLISH (e.g. Mumbai, Bengaluru), not Hindi script."},
+                    "toText": {"type": "string", "description": "Drop city in ENGLISH (e.g. Pune, Chennai), not Hindi script."},
+                    "vehicleType": {"type": "string", "description": "Vehicle type normalized as number+ft, e.g. 16ft, 20ft, 32ft."},
                     "offeredPriceInr": {"type": "integer", "description": "Price in rupees the customer can pay."},
                     "pickupDate": {"type": "string", "description": "Date needed (any format)."},
                     "note": {"type": "string", "description": "Any extra detail."},
