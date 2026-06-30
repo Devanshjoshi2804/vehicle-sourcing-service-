@@ -26,7 +26,13 @@ describe("PlivoCxClient", () => {
     });
 
     expect(sent).toHaveLength(1);
-    expect(sent[0].url).toBe("https://agentflow.plivo.com/v1/account/X/flow/Y");
+    // variables go on the trigger URL as query params (so {{Start.http.params.X}} resolves)
+    const u = new URL(sent[0].url);
+    expect(u.origin + u.pathname).toBe("https://agentflow.plivo.com/v1/account/X/flow/Y");
+    expect(u.searchParams.get("conversation_id")).toBe(conversationId);
+    expect(u.searchParams.get("to")).toBe("Pune");
+    expect(u.searchParams.get("owner_phone")).toBe("+919111111111");
+    expect(u.searchParams.get("fixed_price")).toBe("13000");
     const b = sent[0].body;
     // the id we return is exactly the one we passed in — so the agent's report matches
     expect(b.conversation_id).toBe(conversationId);

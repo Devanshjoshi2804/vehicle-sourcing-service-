@@ -23,10 +23,13 @@ export function buildPlivoCxClient(cfg: Config, httpPost: HttpPost = defaultPost
     async originateCall({ toNumber, dynamicVariables: v }) {
       if (!url) throw new Error("PLIVO_AGENTFLOW_URL not set (VOICE_PROVIDER=plivo)");
       const conversationId = randomUUID();
-      const body = {
+      // String fields for the query string. The flow reads these as
+      // {{Start.http.params.X}} — query params populate that reliably, where a
+      // JSON body did not (it left the greeting + report conversation_id empty).
+      const fields: Record<string, string> = {
         company: v.company ?? cfg.companyName,
         conversation_id: conversationId,
-        fixed_price: Number(v.fixed_price ?? 0), // flow declares this field as Number
+        fixed_price: String(v.fixed_price ?? ""),
         flow: v.flow ?? "offer",
         from: v.from ?? "",
         owner_name: v.owner_name ?? "",
@@ -35,7 +38,12 @@ export function buildPlivoCxClient(cfg: Config, httpPost: HttpPost = defaultPost
         to: v.to ?? "",
         vehicle_type: v.vehicle_type ?? "",
       };
-      await httpPost(url, body, { "Content-Type": "application/json" });
+      const qs = new URLSearchParams(fields).toString();
+      const triggerUrl = `${url}${url.includes("?") ? "&" : "?"}${qs}`;
+      // Send both: query params (for Start.http.params) AND the JSON body (belt
+      // and suspenders, with a numeric fixed_price as the flow's schema expects).
+      const body = { ...fields, fixed_price: Number(fields.fixed_price || 0) };
+      await httpPost(triggerUrl, body, { "Content-Type": "application/json" });
       return { conversationId };
     },
   };
