@@ -15,13 +15,20 @@ const boolish = z.preprocess(
   (v) => (typeof v === "string" ? ["true", "yes", "1"].includes(v.toLowerCase()) : v),
   z.boolean().nullable().optional(),
 );
+// Voice-sourced price: tolerate "", "15000", "{{quoted_price}}" (unsubstituted),
+// "₹15,000" — anything non-numeric becomes null instead of a 400.
+const intish = z.preprocess((v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(String(v).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) && n !== 0 ? Math.round(n) : v === 0 || v === "0" ? 0 : null;
+}, z.number().int().nullable().optional());
 const ReportSchema = z
   .object({
     conversationId: z.string().min(1).optional(),
     conversation_id: z.string().min(1).optional(), // Plivo CX
     available: z.enum(["YES", "NO", "CALLBACK"]),
-    quotedPriceInr: z.coerce.number().int().nullable().optional(),
-    quoted_price_inr: z.coerce.number().int().nullable().optional(),
+    quotedPriceInr: intish,
+    quoted_price_inr: intish,
     acceptsFixed: boolish,
     accepts_fixed: boolish,
     vehicleType: z.string().nullable().optional(),
