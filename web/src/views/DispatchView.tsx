@@ -174,6 +174,11 @@ export function DispatchView() {
     refreshCalls();
     refreshLoads();
   }
+  async function reoffer(ownerId: string, priceInr: number) {
+    if (!selId) return;
+    await api.reoffer(selId, ownerId, priceInr);
+    refreshCalls();
+  }
   async function closeLoad() {
     if (!selId) return;
     await api.closeLoad(selId);
@@ -268,8 +273,10 @@ export function DispatchView() {
                 quotes={quotes ?? []}
                 owners={owners ?? []}
                 demandStatus={demand?.status ?? null}
+                lockedPrice={demand?.lockedPriceInr ?? null}
                 onFollowup={followup}
                 onAccept={acceptOwner}
+                onReoffer={reoffer}
                 onClose={closeLoad}
               />
             </div>

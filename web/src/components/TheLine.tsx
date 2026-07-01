@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Phone, Check, TrendingUp, X, RotateCw, Truck, Radio, Lock, ArrowRight } from "lucide-react";
+import { Phone, PhoneCall, Check, TrendingUp, X, RotateCw, Truck, Radio, Lock, ArrowRight } from "lucide-react";
 import { CallAttempt, DemandStatus, Load, Owner, Quote } from "../api/client";
 import { inr, phoneShort } from "../lib/format";
 import { Button, Chip, Empty } from "./ui";
@@ -79,6 +79,7 @@ function CallStrip({
   fixedPrice,
   onFollowup,
   onAccept,
+  onReoffer,
   i,
 }: {
   call: CallAttempt;
@@ -87,14 +88,15 @@ function CallStrip({
   fixedPrice: number;
   onFollowup: (ownerId: string) => void;
   onAccept: (ownerId: string, priceInr: number) => void;
+  onReoffer: (ownerId: string, priceInr: number) => void;
   i: number;
 }) {
   const o = resolveOutcome(call, quote);
   const m = META[o];
   const active = o === "DIALING" || o === "ON_CALL";
-  // editable accept price — prefilled with the driver's counter, but the dispatcher
-  // can negotiate to any value (e.g. meet in the middle) before locking.
-  const [acceptPrice, setAcceptPrice] = useState<number>(quote?.quotedPriceInr ?? fixedPrice);
+  // editable re-offer price — the value we'd call the driver back with (starts at
+  // his counter; the dispatcher can lower it to meet in the middle).
+  const [reofferPrice, setReofferPrice] = useState<number>(quote?.quotedPriceInr ?? fixedPrice);
 
   return (
     <div
@@ -144,36 +146,49 @@ function CallStrip({
         </div>
       </div>
 
-      {/* action row (counter only): negotiate a price, then accept or hold */}
+      {/* action row (counter only): accept his price · re-offer a new one · hold fixed */}
       {o === "COUNTER" && (
-        <div className="mt-2.5 flex flex-wrap items-center justify-end gap-1.5 pl-[54px]">
-          <span className="mr-auto font-mono text-[10px] uppercase tracking-[0.1em] text-faint">Lock at</span>
-          <div className="flex items-center rounded-lg border border-go/30 bg-goSoft/40 pl-2">
-            <span className="font-mono text-[12px] text-go">₹</span>
-            <input
-              type="number"
-              value={acceptPrice || ""}
-              onChange={(e) => setAcceptPrice(Number(e.target.value))}
-              className="w-[70px] bg-transparent px-1 py-1.5 font-mono text-[12px] tnum text-go focus:outline-none"
-              title="Set the price to lock this driver at"
-            />
-          </div>
+        <div className="mt-2.5 flex flex-wrap items-center gap-2 pl-[54px]">
+          {/* accept the driver's counter directly */}
           <Button
             variant="go"
             className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
-            onClick={() => owner && acceptPrice > 0 && onAccept(owner.id, acceptPrice)}
-            title="Lock this driver at the price shown"
+            onClick={() => owner && quote?.quotedPriceInr && onAccept(owner.id, quote.quotedPriceInr)}
+            title="Lock this driver at the price he asked — then confirm the customer"
           >
-            <Check size={12} /> Accept
+            <Check size={12} /> Accept {inr(quote?.quotedPriceInr)}
           </Button>
-          <Button
-            variant="amber"
-            className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
-            onClick={() => owner && onFollowup(owner.id)}
-            title="Call back and hold the fixed price"
-          >
-            <RotateCw size={12} /> Hold {inr(fixedPrice)}
-          </Button>
+
+          {/* re-negotiate: call him back with a new offer */}
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-faint">Re-offer</span>
+            <div className="flex items-center rounded-lg border border-line2 bg-panel pl-2">
+              <span className="font-mono text-[12px] text-muted">₹</span>
+              <input
+                type="number"
+                value={reofferPrice || ""}
+                onChange={(e) => setReofferPrice(Number(e.target.value))}
+                className="w-[68px] bg-transparent px-1 py-1.5 font-mono text-[12px] tnum text-fg focus:outline-none"
+                title="Price to offer the driver on a call-back"
+              />
+            </div>
+            <Button
+              variant="primary"
+              className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+              onClick={() => owner && reofferPrice > 0 && onReoffer(owner.id, reofferPrice)}
+              title="Call the driver back and offer this new price"
+            >
+              <PhoneCall size={12} /> Send
+            </Button>
+            <Button
+              variant="amber"
+              className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+              onClick={() => owner && onFollowup(owner.id)}
+              title="Call back and push the fixed price"
+            >
+              <RotateCw size={12} /> Hold {inr(fixedPrice)}
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -186,8 +201,10 @@ export function TheLine({
   quotes,
   owners,
   demandStatus,
+  lockedPrice,
   onFollowup,
   onAccept,
+  onReoffer,
   onClose,
 }: {
   load: Load;
@@ -195,8 +212,10 @@ export function TheLine({
   quotes: Quote[];
   owners: Owner[];
   demandStatus?: DemandStatus | null;
+  lockedPrice?: number | null;
   onFollowup: (ownerId: string) => void;
   onAccept: (ownerId: string, priceInr: number) => void;
+  onReoffer: (ownerId: string, priceInr: number) => void;
   onClose: () => void;
 }) {
   const ownerById = new Map(owners.map((o) => [o.id, o]));
@@ -274,6 +293,7 @@ export function TheLine({
               fixedPrice={load.fixedPriceInr}
               onFollowup={onFollowup}
               onAccept={onAccept}
+              onReoffer={onReoffer}
               i={i}
             />
           ))
@@ -292,10 +312,10 @@ export function TheLine({
           </span>
           <div className="min-w-0 flex-1">
             <div className={`font-mono text-[10px] font-600 uppercase tracking-[0.14em] ${booked ? "text-violet" : "text-go"}`}>
-              {booked ? "Trip booked" : "Driver locked at fixed freight"}
+              {booked ? "Trip booked" : lockedPrice && lockedPrice !== load.fixedPriceInr ? "Driver locked (negotiated)" : "Driver locked at fixed freight"}
             </div>
             <div className="truncate text-[14px] font-700 text-fg">
-              {wonOwner?.name ?? "Driver"} · <span className={`font-mono tnum ${booked ? "text-violet" : "text-go"}`}>{inr(load.fixedPriceInr)}</span>
+              {wonOwner?.name ?? "Driver"} · <span className={`font-mono tnum ${booked ? "text-violet" : "text-go"}`}>{inr(lockedPrice ?? load.fixedPriceInr)}</span>
             </div>
           </div>
           {/* Side-B load (no customer): dispatcher just closes it. */}

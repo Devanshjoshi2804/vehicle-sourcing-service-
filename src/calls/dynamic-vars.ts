@@ -7,6 +7,7 @@ export function buildDynamicVars(
   owner: Owner,
   flow: CallFlow,
   companyName: string,
+  offerPriceInr?: number, // re-negotiate: offer a price other than the load's fixed one
 ): Record<string, string> {
   return {
     flow,
@@ -15,7 +16,7 @@ export function buildDynamicVars(
     to: load.toLocation,
     vehicle_type: load.vehicleType,
     pickup_date: load.pickupDate,
-    fixed_price: String(load.fixedPriceInr),
+    fixed_price: String(offerPriceInr ?? load.fixedPriceInr),
     company: companyName,
   };
 }

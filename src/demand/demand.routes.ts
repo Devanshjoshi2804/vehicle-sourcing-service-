@@ -171,4 +171,24 @@ export function registerDemandRoutes(
       return { status: "LOCKED", ownerId, lockedPriceInr: priceInr };
     },
   );
+
+  // Re-negotiate: call this driver back with a NEW offer price (a counter-offer),
+  // instead of accepting theirs. The agent pitches priceInr; the driver can accept
+  // it on the call, which flows back and locks like any acceptance.
+  const ReofferBody = z.object({ priceInr: z.coerce.number().int().positive() });
+  app.post<{ Params: { id: string; ownerId: string } }>(
+    "/loads/:id/owners/:ownerId/reoffer",
+    { preHandler },
+    async (req, reply) => {
+      const parsed = ReofferBody.safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      const { id: loadId, ownerId } = req.params;
+      const load = await deps.loadsRepo.getLoad(loadId);
+      if (!load) return reply.code(404).send({ error: "load not found" });
+      await deps.orchestrator.enqueue(loadId, [ownerId], "fixed_price_followup", {
+        offerPriceInr: parsed.data.priceInr,
+      });
+      return reply.code(202).send({ queued: 1, offeredPriceInr: parsed.data.priceInr });
+    },
+  );
 }

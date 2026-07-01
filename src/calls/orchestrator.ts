@@ -24,6 +24,7 @@ export class CallOrchestrator {
     loadId: string,
     ownerIds: string[],
     flow: CallFlow = "offer",
+    opts: { offerPriceInr?: number } = {},
   ): Promise<{ queued: number }> {
     const load = await this.d.loadsRepo.getLoad(loadId);
     if (!load) throw new Error("load not found");
@@ -44,7 +45,7 @@ export class CallOrchestrator {
     }
     await this.d.loadsRepo.setStatus(loadId, "CALLING");
 
-    await this.drain(attempts, load, byId, flow);
+    await this.drain(attempts, load, byId, flow, opts.offerPriceInr);
     return { queued: attempts.length };
   }
 
@@ -53,6 +54,7 @@ export class CallOrchestrator {
     load: Load,
     byId: Map<string, Owner>,
     flow: CallFlow,
+    offerPriceInr?: number,
   ) {
     const limit = this.d.config.maxConcurrent;
     let idx = 0;
@@ -60,7 +62,7 @@ export class CallOrchestrator {
       while (idx < attempts.length) {
         const a = attempts[idx++];
         const owner = byId.get(a.ownerId);
-        if (owner) await this.placeOne(a, load, owner, flow);
+        if (owner) await this.placeOne(a, load, owner, flow, offerPriceInr);
       }
     };
     await Promise.all(Array.from({ length: Math.min(limit, attempts.length) }, worker));
@@ -89,8 +91,8 @@ export class CallOrchestrator {
     }
   }
 
-  private async placeOne(a: CallAttempt, load: Load, owner: Owner, flow: CallFlow) {
-    const vars = buildDynamicVars(load, owner, flow, this.d.config.companyName);
+  private async placeOne(a: CallAttempt, load: Load, owner: Owner, flow: CallFlow, offerPriceInr?: number) {
+    const vars = buildDynamicVars(load, owner, flow, this.d.config.companyName, offerPriceInr);
     for (let attempt = 1; attempt <= this.d.config.maxAttempts; attempt++) {
       // First-accept-wins: a driver may have locked this load while this call sat
       // queued behind the concurrency limit. If so, don't dial them.

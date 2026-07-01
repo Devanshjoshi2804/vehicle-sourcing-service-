@@ -159,6 +159,9 @@ export const api = {
   // accept a driver at a chosen price (e.g. take their counter) → locks the load
   acceptOwner: (id: string, ownerId: string, priceInr: number) =>
     req<{ status: string; lockedPriceInr: number }>("POST", `/loads/${id}/owners/${ownerId}/accept`, { priceInr }),
+  // re-negotiate: call the driver back offering a new price (a counter-offer)
+  reoffer: (id: string, ownerId: string, priceInr: number) =>
+    req<{ queued: number; offeredPriceInr: number }>("POST", `/loads/${id}/owners/${ownerId}/reoffer`, { priceInr }),
   closeLoad: (id: string) => req<{ status: string }>("POST", `/loads/${id}/close`),
   // demand — the domino
   listDemand: (filter: { status?: DemandStatus; loadId?: string } = {}) => {
