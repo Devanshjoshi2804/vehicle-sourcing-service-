@@ -245,19 +245,38 @@ export function registerWebhookRoutes(
   // (the in-call HTTP action ships empty requests). Permissive on field names +
   // format; always 200 so Plivo never retries/marks the call failed.
   app.post("/webhooks/plivo-hangup", { preHandler }, async (req, reply) => {
+    const raw = req.body as any;
     app.log.info(
-      { ct: req.headers["content-type"], body: req.body, query: req.query },
+      { ct: req.headers["content-type"], body: raw, query: req.query },
       "[plivo-hangup RAW]",
     );
-    const p = { ...((req.query as object) ?? {}), ...((req.body as object) ?? {}) } as any;
-    const cid = firstOf(p, "conversationId", "conversation_id", "ConversationId", "cid");
-    const availableRaw = firstOf(p, "available", "Available", "availability");
-    const qpRaw = firstOf(p, "quotedPriceInr", "quoted_price", "quoted_price_inr", "quotedPrice");
-    const afRaw = firstOf(p, "acceptsFixed", "accepts_fixed", "AcceptsFixed");
-    const note = firstOf(p, "note", "Note");
-    const vt = firstOf(p, "vehicleType", "vehicle_type");
+    // Plivo nests the call fields + extracted variables under data.object.event_data,
+    // with node-prefixed keys like "Offer Confirmation Agent.quotedpriceinr" and
+    // "Start.http.params.conversation_id". Match by the last key segment.
+    const ed: Record<string, any> = raw?.data?.object?.event_data ?? raw?.event_data ?? {};
+    let cid: any = null;
+    let availableRaw: any = null;
+    let afRaw: any = null;
+    let qpRaw: any = null;
+    let note: any = null;
+    let vt: any = null;
+    for (const [k, v] of Object.entries(ed)) {
+      const lk = k.toLowerCase();
+      const seg = lk.split(".").pop();
+      if (lk.includes("http.params.conversation_id")) cid = v; // OUR id (not Plivo's)
+      else if (seg === "available") availableRaw = v;
+      else if (seg === "acceptsfixed") afRaw = v;
+      else if (seg === "quotedpriceinr") qpRaw = v;
+      else if (seg === "note") note = v;
+      else if (seg === "vehicle_type") vt = v;
+    }
+    // fall back to query/body if a non-Plivo caller ever posts flat fields
+    const flat = { ...((req.query as object) ?? {}), ...((typeof raw === "object" ? raw : {}) as object) } as any;
+    if (!cid) cid = firstOf(flat, "conversationId", "conversation_id");
+    if (cid && String(cid).startsWith("{{")) cid = null; // ignore unsubstituted template
+
     const quotedPriceInr =
-      qpRaw != null ? Number(String(qpRaw).replace(/[^\d.-]/g, "")) || null : null;
+      qpRaw != null && qpRaw !== "" ? Number(String(qpRaw).replace(/[^\d.-]/g, "")) || null : null;
     const acceptsFixed =
       afRaw == null
         ? null
