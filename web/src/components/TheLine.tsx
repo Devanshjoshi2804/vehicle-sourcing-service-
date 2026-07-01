@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Phone, Check, TrendingUp, X, RotateCw, Truck, Radio, Lock, ArrowRight } from "lucide-react";
 import { CallAttempt, DemandStatus, Load, Owner, Quote } from "../api/client";
 import { inr, phoneShort } from "../lib/format";
@@ -91,6 +92,9 @@ function CallStrip({
   const o = resolveOutcome(call, quote);
   const m = META[o];
   const active = o === "DIALING" || o === "ON_CALL";
+  // editable accept price — prefilled with the driver's counter, but the dispatcher
+  // can negotiate to any value (e.g. meet in the middle) before locking.
+  const [acceptPrice, setAcceptPrice] = useState<number>(quote?.quotedPriceInr ?? fixedPrice);
 
   return (
     <div
@@ -140,17 +144,28 @@ function CallStrip({
 
         {o === "COUNTER" ? (
           <div className="flex items-center gap-1.5">
+            {/* editable lock price — starts at the driver's counter, negotiable */}
+            <div className="flex items-center rounded-lg border border-go/30 bg-goSoft/40 pl-2">
+              <span className="font-mono text-[12px] text-go">₹</span>
+              <input
+                type="number"
+                value={acceptPrice || ""}
+                onChange={(e) => setAcceptPrice(Number(e.target.value))}
+                className="w-[64px] bg-transparent px-1 py-1.5 font-mono text-[12px] tnum text-go focus:outline-none"
+                title="Set the price to lock this driver at"
+              />
+            </div>
             <Button
               variant="go"
-              className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
-              onClick={() => owner && quote?.quotedPriceInr && onAccept(owner.id, quote.quotedPriceInr)}
-              title="Accept the driver's price and lock the load"
+              className="!rounded-lg !px-2 !py-1.5 !text-[11px]"
+              onClick={() => owner && acceptPrice > 0 && onAccept(owner.id, acceptPrice)}
+              title="Lock this driver at the price shown"
             >
-              <Check size={12} /> Accept {inr(quote?.quotedPriceInr)}
+              <Check size={12} /> Accept
             </Button>
             <Button
               variant="amber"
-              className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+              className="!rounded-lg !px-2 !py-1.5 !text-[11px]"
               onClick={() => owner && onFollowup(owner.id)}
               title="Call back and hold the fixed price"
             >
