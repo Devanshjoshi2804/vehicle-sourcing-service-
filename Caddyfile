@@ -10,3 +10,8 @@
 {$VOICE_DOMAIN} {
 	reverse_proxy voice-agent:4300
 }
+
+# Dispatcher console (static SPA).
+{$CONSOLE_DOMAIN} {
+	reverse_proxy web:80
+}

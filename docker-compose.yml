@@ -42,6 +42,18 @@ services:
       - app
     restart: unless-stopped
 
+  # Dispatcher console (static SPA, served by nginx). API base + key are baked in
+  # at build time from the API domain + key.
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_BASE: "https://${PUBLIC_DOMAIN}"
+        VITE_API_KEY: "${API_KEY}"
+    depends_on:
+      - app
+    restart: unless-stopped
+
   caddy:
     image: caddy:2
     ports:
@@ -50,6 +62,7 @@ services:
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
       VOICE_DOMAIN: ${VOICE_DOMAIN:?set VOICE_DOMAIN in .env}
+      CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set CONSOLE_DOMAIN in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -57,6 +70,7 @@ services:
     depends_on:
       - app
       - voice-agent
+      - web
     restart: unless-stopped
 
 volumes:
