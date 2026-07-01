@@ -68,7 +68,7 @@ describe("webhooks", () => {
     await app.close();
   });
 
-  it("writes a quote, is idempotent, and auto-queues follow-up when accepts_fixed=false", async () => {
+  it("writes a counter quote, is idempotent, and does NOT auto-recall the driver", async () => {
     const { pool } = await withTestDb();
     const calls: string[] = [];
     let n = 0;
@@ -107,8 +107,9 @@ describe("webhooks", () => {
     expect(replay.statusCode).toBe(200);
     expect(replay.json().created).toBe(false);
 
-    // Auto follow-up should have placed a second call (conv_2).
-    expect(calls).toContain("conv_2");
+    // A counter must NOT auto-recall the driver — no second call is placed.
+    // (The dispatcher chooses "Accept ₹counter" or "Hold ₹fixed" on the board.)
+    expect(calls).not.toContain("conv_2");
 
     // post-call attaches transcript + marks DONE
     await app.inject({

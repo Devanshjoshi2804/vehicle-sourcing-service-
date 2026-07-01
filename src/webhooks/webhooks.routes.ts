@@ -134,9 +134,10 @@ export function registerWebhookRoutes(
       note: f.note ?? null,
     });
 
-    if (created && call.flow === "offer" && available === "YES" && acceptsFixed === false) {
-      await deps.orchestrator.enqueue(call.loadId, [call.ownerId], "fixed_price_followup");
-    }
+    // NOTE: a counter (available YES, acceptsFixed false) is NOT auto-recalled.
+    // The dispatcher decides on the board: "Accept ₹<counter>" or "Hold ₹<fixed>"
+    // (the Hold button triggers a fixed_price_followup manually). Auto-recalling
+    // was confusing — it called the driver twice with the same conversation.
     if (created && available === "YES" && acceptsFixed === true) {
       const load = await deps.loadsRepo.getLoad(call.loadId);
       const demand = await deps.demandRepo.findByLoadId(call.loadId);
