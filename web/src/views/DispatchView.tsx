@@ -168,6 +168,12 @@ export function DispatchView() {
     await api.followup(selId, ownerId);
     refreshCalls();
   }
+  async function acceptOwner(ownerId: string, priceInr: number) {
+    if (!selId) return;
+    await api.acceptOwner(selId, ownerId, priceInr);
+    refreshCalls();
+    refreshLoads();
+  }
   async function closeLoad() {
     if (!selId) return;
     await api.closeLoad(selId);
@@ -263,6 +269,7 @@ export function DispatchView() {
                 owners={owners ?? []}
                 demandStatus={demand?.status ?? null}
                 onFollowup={followup}
+                onAccept={acceptOwner}
                 onClose={closeLoad}
               />
             </div>

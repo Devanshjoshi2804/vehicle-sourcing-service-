@@ -77,6 +77,7 @@ function CallStrip({
   quote,
   fixedPrice,
   onFollowup,
+  onAccept,
   i,
 }: {
   call: CallAttempt;
@@ -84,6 +85,7 @@ function CallStrip({
   quote?: Quote;
   fixedPrice: number;
   onFollowup: (ownerId: string) => void;
+  onAccept: (ownerId: string, priceInr: number) => void;
   i: number;
 }) {
   const o = resolveOutcome(call, quote);
@@ -137,14 +139,24 @@ function CallStrip({
         </div>
 
         {o === "COUNTER" ? (
-          <Button
-            variant="amber"
-            className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
-            onClick={() => owner && onFollowup(owner.id)}
-            title="Call back and hold the fixed price"
-          >
-            <RotateCw size={12} /> Hold {inr(fixedPrice)}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="go"
+              className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+              onClick={() => owner && quote?.quotedPriceInr && onAccept(owner.id, quote.quotedPriceInr)}
+              title="Accept the driver's price and lock the load"
+            >
+              <Check size={12} /> Accept {inr(quote?.quotedPriceInr)}
+            </Button>
+            <Button
+              variant="amber"
+              className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+              onClick={() => owner && onFollowup(owner.id)}
+              title="Call back and hold the fixed price"
+            >
+              <RotateCw size={12} /> Hold {inr(fixedPrice)}
+            </Button>
+          </div>
         ) : (
           <div className="hidden w-[112px] sm:block" />
         )}
@@ -160,6 +172,7 @@ export function TheLine({
   owners,
   demandStatus,
   onFollowup,
+  onAccept,
   onClose,
 }: {
   load: Load;
@@ -168,6 +181,7 @@ export function TheLine({
   owners: Owner[];
   demandStatus?: DemandStatus | null;
   onFollowup: (ownerId: string) => void;
+  onAccept: (ownerId: string, priceInr: number) => void;
   onClose: () => void;
 }) {
   const ownerById = new Map(owners.map((o) => [o.id, o]));
@@ -244,6 +258,7 @@ export function TheLine({
               quote={quoteFor(c)}
               fixedPrice={load.fixedPriceInr}
               onFollowup={onFollowup}
+              onAccept={onAccept}
               i={i}
             />
           ))

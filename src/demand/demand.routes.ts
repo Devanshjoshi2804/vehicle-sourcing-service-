@@ -140,4 +140,35 @@ export function registerDemandRoutes(
     if (!result.sourced) return reply.code(400).send({ error: `cannot re-source: ${result.reason}` });
     return reply.code(202).send({ loadId: result.loadId, calledOwners: result.calledOwners, status: "SOURCING" });
   });
+
+  // Accept a specific driver at a specific price (e.g. take their counter). Locks
+  // the load to that owner at priceInr and stops calling everyone else — same as an
+  // on-call accept, but at a dispatcher-chosen price instead of the fixed one.
+  const AcceptBody = z.object({ priceInr: z.coerce.number().int().positive().optional() });
+  app.post<{ Params: { id: string; ownerId: string } }>(
+    "/loads/:id/owners/:ownerId/accept",
+    { preHandler },
+    async (req, reply) => {
+      const parsed = AcceptBody.safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      const { id: loadId, ownerId } = req.params;
+      const load = await deps.loadsRepo.getLoad(loadId);
+      if (!load) return reply.code(404).send({ error: "load not found" });
+      const priceInr = parsed.data.priceInr ?? load.fixedPriceInr;
+
+      const demand = await deps.demandRepo.findByLoadId(loadId);
+      if (demand) {
+        // race-safe: only locks from SOURCING (nobody else locked first)
+        const locked = await deps.demandRepo.lockDriver(loadId, ownerId, priceInr);
+        if (!locked) return reply.code(409).send({ error: `cannot accept from ${demand.status}` });
+        await deps.loadsRepo.setStatus(loadId, "LOCKED");
+        await deps.callsRepo.supersedePending(loadId, ownerId);
+        return { status: "DRIVER_LOCKED", ownerId, lockedPriceInr: priceInr };
+      }
+      // Side-B (dispatcher-posted, no customer): just lock the load to this owner.
+      await deps.loadsRepo.setStatus(loadId, "LOCKED");
+      await deps.callsRepo.supersedePending(loadId, ownerId);
+      return { status: "LOCKED", ownerId, lockedPriceInr: priceInr };
+    },
+  );
 }

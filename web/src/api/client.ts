@@ -156,6 +156,9 @@ export const api = {
   loadQuotes: (id: string) => req<Quote[]>("GET", `/loads/${id}/quotes`),
   followup: (id: string, ownerId: string) =>
     req<{ queued: number }>("POST", `/loads/${id}/owners/${ownerId}/followup`),
+  // accept a driver at a chosen price (e.g. take their counter) → locks the load
+  acceptOwner: (id: string, ownerId: string, priceInr: number) =>
+    req<{ status: string; lockedPriceInr: number }>("POST", `/loads/${id}/owners/${ownerId}/accept`, { priceInr }),
   closeLoad: (id: string) => req<{ status: string }>("POST", `/loads/${id}/close`),
   // demand — the domino
   listDemand: (filter: { status?: DemandStatus; loadId?: string } = {}) => {
