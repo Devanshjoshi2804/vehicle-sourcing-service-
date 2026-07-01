@@ -25,8 +25,24 @@ function ticketNo(id: string): string {
 // The load rendered as a freight docket (LR/bilty): the one thing every dispatch
 // is about. Perforated stub at the bottom carries the live run state; the rubber
 // stamp on the right is the at-a-glance status the dispatcher reads first.
-export function LoadDocket({ load, run, locked }: { load: Load; run: Run; locked: boolean }) {
+export function LoadDocket({
+  load,
+  run,
+  locked,
+  lockedPrice,
+}: {
+  load: Load;
+  run: Run;
+  locked: boolean;
+  lockedPrice?: number | null;
+}) {
   const calling = load.status === "CALLING";
+  const booked = load.status === "BOOKED";
+  // Once locked/booked, show the price actually agreed (may differ from the fixed
+  // offer after a negotiation), with the original fixed struck through beside it.
+  const negotiated = (locked || booked) && lockedPrice != null && lockedPrice !== load.fixedPriceInr;
+  const shownPrice = locked || booked ? (lockedPrice ?? load.fixedPriceInr) : load.fixedPriceInr;
+  const priceLabel = booked ? "Booked at" : negotiated ? "Agreed freight" : "Fixed freight";
   return (
     <section className="relative overflow-hidden rounded-2xl shadow-hero">
       <div className="absolute inset-0 bg-gradient-to-br from-deep via-deep2 to-deep" />
@@ -70,10 +86,15 @@ export function LoadDocket({ load, run, locked }: { load: Load; run: Run; locked
           <div className="flex flex-col items-end gap-3">
             <Stamp status={load.status} locked={locked} />
             <div className="text-right">
-              <div className="font-mono text-[10px] font-600 uppercase tracking-[0.2em] text-amber/90">Fixed freight</div>
-              <div className="font-mono text-[40px] font-700 leading-none tracking-[-0.02em] text-white tnum">
-                {inr(load.fixedPriceInr)}
+              <div className={`font-mono text-[10px] font-600 uppercase tracking-[0.2em] ${booked ? "text-white/70" : "text-amber/90"}`}>
+                {priceLabel}
               </div>
+              <div className="font-mono text-[40px] font-700 leading-none tracking-[-0.02em] text-white tnum">
+                {inr(shownPrice)}
+              </div>
+              {negotiated && (
+                <div className="mt-0.5 font-mono text-[11px] tnum text-white/45 line-through">{inr(load.fixedPriceInr)}</div>
+              )}
             </div>
           </div>
         </div>

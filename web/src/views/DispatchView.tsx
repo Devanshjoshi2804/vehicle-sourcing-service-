@@ -264,7 +264,7 @@ export function DispatchView() {
           </Panel>
         ) : (
           <>
-            <LoadDocket load={selected} run={run} locked={locked} />
+            <LoadDocket load={selected} run={run} locked={locked} lockedPrice={demand?.lockedPriceInr ?? null} />
             <div className="grid min-h-[440px] grid-cols-1 gap-5 xl:grid-cols-[minmax(290px,380px)_1fr]">
               <TheLane load={selected} calledOwnerIds={calledOwnerIds} onFired={refreshCalls} />
               <TheLine
