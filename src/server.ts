@@ -50,6 +50,14 @@ export function buildServer(deps: {
     try {
       done(null, JSON.parse(s));
     } catch {
+      // maybe form-encoded under a different content type
+      if (s.includes("=")) {
+        try {
+          return done(null, Object.fromEntries(new URLSearchParams(s)));
+        } catch {
+          /* fall through */
+        }
+      }
       done(null, {});
     }
   });

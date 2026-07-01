@@ -95,6 +95,74 @@ export function registerWebhookRoutes(
     orchestrator: deps.orchestrator,
   };
 
+  // Shared: record an owner's availability outcome + run the domino (follow-up on
+  // counter, lock on accept). Used by the in-call report and the hangup callback.
+  async function recordAvailability(f: {
+    cid?: string | null;
+    available?: string | null;
+    acceptsFixed?: boolean | null;
+    quotedPriceInr?: number | null;
+    vehicleType?: string | null;
+    note?: string | null;
+  }): Promise<{ ok: boolean; reason?: string; created?: boolean }> {
+    if (!f.cid) return { ok: false, reason: "no conversationId" };
+    const call = await deps.callsRepo.findByConversationId(f.cid);
+    if (!call) return { ok: false, reason: "unknown conversation" };
+
+    const quotedPriceInr = f.quotedPriceInr ?? null;
+    const availableProvided = f.available != null;
+    const availUpper = (f.available ?? "YES").toUpperCase();
+    const available = (["YES", "NO", "CALLBACK"].includes(availUpper) ? availUpper : "YES") as
+      | "YES"
+      | "NO"
+      | "CALLBACK";
+    let acceptsFixed = f.acceptsFixed ?? null;
+    if (acceptsFixed === null) {
+      if (quotedPriceInr != null) acceptsFixed = false;
+      else if (availableProvided && available === "YES") acceptsFixed = true;
+    }
+
+    const { created } = await deps.quotesRepo.upsertByConversation({
+      loadId: call.loadId,
+      ownerId: call.ownerId,
+      callAttemptId: call.id,
+      elConversationId: f.cid,
+      available,
+      quotedPriceInr,
+      acceptsFixed,
+      vehicleType: f.vehicleType ?? null,
+      note: f.note ?? null,
+    });
+
+    if (created && call.flow === "offer" && available === "YES" && acceptsFixed === false) {
+      await deps.orchestrator.enqueue(call.loadId, [call.ownerId], "fixed_price_followup");
+    }
+    if (created && available === "YES" && acceptsFixed === true) {
+      const load = await deps.loadsRepo.getLoad(call.loadId);
+      const demand = await deps.demandRepo.findByLoadId(call.loadId);
+      if (demand) {
+        const locked = await deps.demandRepo.lockDriver(
+          call.loadId,
+          call.ownerId,
+          load?.fixedPriceInr ?? quotedPriceInr ?? 0,
+        );
+        if (locked) {
+          await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
+          await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
+        }
+      } else if (load && load.status === "CALLING") {
+        await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
+        await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
+      }
+    }
+    return { ok: true, created };
+  }
+
+  const firstOf = (o: any, ...keys: string[]) => {
+    for (const k of keys) if (o?.[k] != null && o[k] !== "") return o[k];
+    return null;
+  };
+
   // Inbound customer call → capture a demand (geocoded). The domino starts here:
   // if the demand is complete (vehicle + price + a matching driver), we AUTO-call
   // drivers immediately. Otherwise it stays NEW for a dispatcher to source by hand.
@@ -160,62 +228,47 @@ export function registerWebhookRoutes(
     const parsed = ReportSchema.safeParse(merged);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const b = parsed.data;
-    // normalize camelCase (OVH agent) vs snake_case (Plivo CX), and infer the
-    // fields Plivo's report node omits.
-    const cid = (b.conversationId || b.conversation_id)!;
-    const quotedPriceInr = b.quotedPriceInr ?? b.quoted_price_inr ?? b.quoted_price ?? null;
-    const availableProvided = b.available != null;
-    const available = b.available ?? "YES"; // node usually only reports when there's an answer
-    let acceptsFixed = b.acceptsFixed ?? b.accepts_fixed ?? null;
-    if (acceptsFixed === null) {
-      // a quoted price means they countered; an explicit YES with no counter means accept.
-      if (quotedPriceInr != null) acceptsFixed = false;
-      else if (availableProvided && available === "YES") acceptsFixed = true;
-    }
-    const call = await deps.callsRepo.findByConversationId(cid);
-    if (!call) return reply.code(404).send({ error: "unknown conversation" });
-
-    const { created } = await deps.quotesRepo.upsertByConversation({
-      loadId: call.loadId,
-      ownerId: call.ownerId,
-      callAttemptId: call.id,
-      elConversationId: cid,
-      available,
-      quotedPriceInr,
-      acceptsFixed,
-      vehicleType: b.vehicleType ?? null,
-      note: b.note ?? null,
+    const r = await recordAvailability({
+      cid: b.conversationId || b.conversation_id,
+      available: b.available,
+      acceptsFixed: b.acceptsFixed ?? b.accepts_fixed,
+      quotedPriceInr: b.quotedPriceInr ?? b.quoted_price_inr ?? b.quoted_price,
+      vehicleType: b.vehicleType,
+      note: b.note,
     });
+    if (!r.ok) return reply.code(r.reason === "unknown conversation" ? 404 : 400).send({ error: r.reason });
+    return reply.code(r.created ? 201 : 200).send({ created: r.created });
+  });
 
-    // Auto follow-up: owner is available but won't take the fixed price, and this was the first offer.
-    if (created && call.flow === "offer" && available === "YES" && acceptsFixed === false) {
-      await deps.orchestrator.enqueue(call.loadId, [call.ownerId], "fixed_price_followup");
-    }
+  // Plivo platform Hangup URL callback: fired by Plivo when the call ends, carrying
+  // the call fields + the agent's Extract-Variables. This is the reliable path
+  // (the in-call HTTP action ships empty requests). Permissive on field names +
+  // format; always 200 so Plivo never retries/marks the call failed.
+  app.post("/webhooks/plivo-hangup", { preHandler }, async (req, reply) => {
+    app.log.info(
+      { ct: req.headers["content-type"], body: req.body, query: req.query },
+      "[plivo-hangup RAW]",
+    );
+    const p = { ...((req.query as object) ?? {}), ...((req.body as object) ?? {}) } as any;
+    const cid = firstOf(p, "conversationId", "conversation_id", "ConversationId", "cid");
+    const availableRaw = firstOf(p, "available", "Available", "availability");
+    const qpRaw = firstOf(p, "quotedPriceInr", "quoted_price", "quoted_price_inr", "quotedPrice");
+    const afRaw = firstOf(p, "acceptsFixed", "accepts_fixed", "AcceptsFixed");
+    const note = firstOf(p, "note", "Note");
+    const vt = firstOf(p, "vehicleType", "vehicle_type");
+    const quotedPriceInr =
+      qpRaw != null ? Number(String(qpRaw).replace(/[^\d.-]/g, "")) || null : null;
+    const acceptsFixed =
+      afRaw == null
+        ? null
+        : typeof afRaw === "boolean"
+          ? afRaw
+          : ["true", "yes", "1"].includes(String(afRaw).toLowerCase());
+    const available = availableRaw ? String(availableRaw).toUpperCase() : null;
 
-    // Domino step 2 — first driver to ACCEPT the fixed price locks the load. We
-    // record the winner, stop dialing everyone else, and stop here: the customer
-    // is NOT called yet — the company approves the value first (see /approve-driver).
-    if (created && available === "YES" && acceptsFixed === true) {
-      const load = await deps.loadsRepo.getLoad(call.loadId);
-      const demand = await deps.demandRepo.findByLoadId(call.loadId);
-      if (demand) {
-        const locked = await deps.demandRepo.lockDriver(
-          call.loadId,
-          call.ownerId,
-          load?.fixedPriceInr ?? quotedPriceInr ?? 0,
-        );
-        if (locked) {
-          await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
-          await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
-        }
-      } else if (load && load.status === "CALLING") {
-        // Side-B (dispatcher-posted, no customer): first accepter still locks the
-        // load and stops the other calls; the dispatcher closes it.
-        await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
-        await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
-      }
-    }
-    return reply.code(created ? 201 : 200).send({ created });
+    const r = await recordAvailability({ cid, available, acceptsFixed, quotedPriceInr, vehicleType: vt, note });
+    app.log.info({ cid, available, acceptsFixed, quotedPriceInr, result: r }, "[plivo-hangup RESULT]");
+    return reply.code(200).send({ ok: r.ok, reason: r.reason });
   });
 
   // Domino step 4 — the customer-confirm call (or the manual "customer confirmed"
