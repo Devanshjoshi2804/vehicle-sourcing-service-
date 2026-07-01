@@ -98,84 +98,84 @@ function CallStrip({
 
   return (
     <div
-      className={`group relative flex items-center gap-3.5 border-b border-line px-5 py-3.5 animate-fade-up transition-colors last:border-b-0 hover:bg-panel2 ${m.tint}`}
+      className={`group relative flex flex-col border-b border-line px-5 py-3.5 animate-fade-up transition-colors last:border-b-0 hover:bg-panel2 ${m.tint}`}
       style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
     >
       <span className="absolute left-0 top-0 h-full w-[3px]" style={{ background: m.accent }} />
-      <div
-        className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-xl border ${
-          active ? "border-amber/30 bg-amberSoft" : "border-line bg-panel2"
-        }`}
-      >
-        {active ? <Dialer /> : <Phone size={15} className="text-faint" />}
-      </div>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[14px] font-700 text-fg">{owner?.name ?? "Driver"}</span>
-          {call.flow === "fixed_price_followup" && (
-            <span className="font-mono text-[9px] font-600 uppercase tracking-[0.12em] text-amber">· holding price</span>
-          )}
+      {/* main row: who + status + their number */}
+      <div className="flex items-center gap-3.5">
+        <div
+          className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-xl border ${
+            active ? "border-amber/30 bg-amberSoft" : "border-line bg-panel2"
+          }`}
+        >
+          {active ? <Dialer /> : <Phone size={15} className="text-faint" />}
         </div>
-        <div className="mt-0.5 flex items-center gap-2.5 font-mono text-[11px] text-muted tnum">
-          <span>{phoneShort(call.phone)}</span>
-          {owner?.vehicleTypes?.[0] && (
-            <span className="flex items-center gap-1 text-faint">
-              <Truck size={11} /> {owner.vehicleTypes[0]}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[14px] font-700 text-fg">{owner?.name ?? "Driver"}</span>
+            {call.flow === "fixed_price_followup" && (
+              <span className="shrink-0 font-mono text-[9px] font-600 uppercase tracking-[0.12em] text-amber">· holding</span>
+            )}
+          </div>
+          <div className="mt-0.5 flex items-center gap-2.5 font-mono text-[11px] text-muted tnum">
+            <span>{phoneShort(call.phone)}</span>
+            {owner?.vehicleTypes?.[0] && (
+              <span className="flex items-center gap-1 text-faint">
+                <Truck size={11} /> {owner.vehicleTypes[0]}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {o === "ON_CALL" && <div className="hidden w-12 justify-center sm:flex">{<Waveform />}</div>}
+
+        <div className="flex shrink-0 items-center gap-3">
+          {o === "ACCEPTED" && <span className="font-mono text-[16px] font-700 tnum text-go">{inr(fixedPrice)}</span>}
+          {o === "COUNTER" && (
+            <span className="text-right font-mono tnum leading-tight">
+              <span className="block text-[15px] font-700 text-amber">{inr(quote?.quotedPriceInr)}</span>
+              <span className="text-[10px] text-faint line-through">{inr(fixedPrice)}</span>
             </span>
           )}
-        </div>
-      </div>
-
-      {o === "ON_CALL" && <div className="hidden w-12 justify-center sm:flex">{<Waveform />}</div>}
-
-      <div className="flex items-center gap-4">
-        {o === "ACCEPTED" && <span className="font-mono text-[16px] font-700 tnum text-go">{inr(fixedPrice)}</span>}
-        {o === "COUNTER" && (
-          <span className="text-right font-mono tnum leading-tight">
-            <span className="block text-[16px] font-700 text-amber">{inr(quote?.quotedPriceInr)}</span>
-            <span className="text-[10px] text-faint line-through">{inr(fixedPrice)}</span>
-          </span>
-        )}
-
-        <div className="w-[92px] text-right">
           <OutcomeChip o={o} />
         </div>
-
-        {o === "COUNTER" ? (
-          <div className="flex items-center gap-1.5">
-            {/* editable lock price — starts at the driver's counter, negotiable */}
-            <div className="flex items-center rounded-lg border border-go/30 bg-goSoft/40 pl-2">
-              <span className="font-mono text-[12px] text-go">₹</span>
-              <input
-                type="number"
-                value={acceptPrice || ""}
-                onChange={(e) => setAcceptPrice(Number(e.target.value))}
-                className="w-[64px] bg-transparent px-1 py-1.5 font-mono text-[12px] tnum text-go focus:outline-none"
-                title="Set the price to lock this driver at"
-              />
-            </div>
-            <Button
-              variant="go"
-              className="!rounded-lg !px-2 !py-1.5 !text-[11px]"
-              onClick={() => owner && acceptPrice > 0 && onAccept(owner.id, acceptPrice)}
-              title="Lock this driver at the price shown"
-            >
-              <Check size={12} /> Accept
-            </Button>
-            <Button
-              variant="amber"
-              className="!rounded-lg !px-2 !py-1.5 !text-[11px]"
-              onClick={() => owner && onFollowup(owner.id)}
-              title="Call back and hold the fixed price"
-            >
-              <RotateCw size={12} /> Hold {inr(fixedPrice)}
-            </Button>
-          </div>
-        ) : (
-          <div className="hidden w-[112px] sm:block" />
-        )}
       </div>
+
+      {/* action row (counter only): negotiate a price, then accept or hold */}
+      {o === "COUNTER" && (
+        <div className="mt-2.5 flex flex-wrap items-center justify-end gap-1.5 pl-[54px]">
+          <span className="mr-auto font-mono text-[10px] uppercase tracking-[0.1em] text-faint">Lock at</span>
+          <div className="flex items-center rounded-lg border border-go/30 bg-goSoft/40 pl-2">
+            <span className="font-mono text-[12px] text-go">₹</span>
+            <input
+              type="number"
+              value={acceptPrice || ""}
+              onChange={(e) => setAcceptPrice(Number(e.target.value))}
+              className="w-[70px] bg-transparent px-1 py-1.5 font-mono text-[12px] tnum text-go focus:outline-none"
+              title="Set the price to lock this driver at"
+            />
+          </div>
+          <Button
+            variant="go"
+            className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+            onClick={() => owner && acceptPrice > 0 && onAccept(owner.id, acceptPrice)}
+            title="Lock this driver at the price shown"
+          >
+            <Check size={12} /> Accept
+          </Button>
+          <Button
+            variant="amber"
+            className="!rounded-lg !px-2.5 !py-1.5 !text-[11px]"
+            onClick={() => owner && onFollowup(owner.id)}
+            title="Call back and hold the fixed price"
+          >
+            <RotateCw size={12} /> Hold {inr(fixedPrice)}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
