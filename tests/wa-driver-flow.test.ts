@@ -26,24 +26,28 @@ async function setup(pool: any) {
   await calls.setConversationId(attempt.id, `wa_${attempt.id}`);
   await calls.setStatus(attempt.id, "IN_PROGRESS");
   const { client, sent } = fakeInterakt();
+  let filled = 0;
   const deps = {
-    availability: { quotesRepo: quotes, callsRepo: calls, loadsRepo: loads, demandRepo: demand },
-    orchestrator: { notifyFilled: async () => {} } as any,
+    availability: {
+      quotesRepo: quotes, callsRepo: calls, loadsRepo: loads, demandRepo: demand,
+      orchestrator: { notifyFilled: async () => { filled++; } },
+    },
     interakt: client, sessions, callsRepo: calls, loadsRepo: loads, config,
   };
-  return { deps, sent, owner, load, attempt, calls, quotes, sessions };
+  return { deps, sent, owner, load, attempt, calls, quotes, sessions, getFilled: () => filled };
 }
 const msg = (from: string, over: any) => ({ from, msgId: `m${Math.random()}`, contactName: "R", ...over });
 
 describe("driver flow", () => {
   it("accept locks the load and confirms to the driver", async () => {
     const { pool } = await withTestDb();
-    const { deps, sent, load, attempt, calls } = await setup(pool);
+    const { deps, sent, load, attempt, calls, getFilled } = await setup(pool);
     await handleDriverMessage(deps as any, msg("919111111155", { kind: "reply", replyId: `acc:${attempt.id}:13000` }) as any, null);
     expect((await calls.getById(attempt.id))!.status).toBe("DONE");
     const { LoadsRepo } = await import("../src/loads/loads.repo.js");
     expect((await new LoadsRepo(pool).getLoad(load.id))!.status).toBe("LOCKED");
     expect(sent.some((s) => s.kind === "text" && /yours/i.test(s.args[0]))).toBe(true);
+    expect(getFilled()).toBe(1);
   });
 
   it("counter asks for the amount, then records the quote", async () => {

@@ -5,12 +5,10 @@ import { InteraktClient } from "./interakt.client.js";
 import { recordAvailability, AvailabilityDeps } from "../quotes/availability.js";
 import { CallsRepo } from "../calls/calls.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
-import { CallOrchestrator } from "../calls/orchestrator.js";
 import { inr } from "./wa-sender.js";
 
 export type DriverFlowDeps = {
   availability: AvailabilityDeps;
-  orchestrator: Pick<CallOrchestrator, "notifyFilled">;
   interakt: InteraktClient;
   sessions: WaSessionsRepo;
   callsRepo: CallsRepo;
@@ -35,7 +33,6 @@ export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, se
       const r = await recordAvailability(deps.availability, {
         cid, available: "YES", acceptsFixed: true, lockPriceInr: price ?? null,
       });
-      if (r.ok && r.locked && r.loadId && r.ownerId) await deps.orchestrator.notifyFilled(r.loadId, r.ownerId);
       await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
       await deps.sessions.clear(m.from);
       await say(
