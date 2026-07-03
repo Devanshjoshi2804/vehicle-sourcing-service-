@@ -31,8 +31,16 @@ export function parseInbound(payload: any, lastOptions: WaOption[]): WaInbound |
 
   if (type === "message_api_clicked") {
     const title: string = msg.button_text || msg.button_payload?.payload?.text || "";
+    // Prefer the button's own payload id (our `verb:uuid[:extra]` grammar) when the
+    // BSP echoes it back — unambiguous even with several concurrent offers.
+    const payloadId = msg.button_payload?.payload?.id ?? msg.button_payload?.id ?? msg.button_payload?.payload?.text;
+    if (typeof payloadId === "string" && payloadId.includes(":")) {
+      return { ...base, kind: "reply", replyId: payloadId, replyTitle: title };
+    }
     const hit = lastOptions.find((o) => norm(o.title) === norm(title));
-    return { ...base, kind: "reply", replyId: hit?.id ?? title, replyTitle: title };
+    if (hit) return { ...base, kind: "reply", replyId: hit.id, replyTitle: title };
+    // ponytail: title fallback maps to the LATEST offer; payload id disambiguates when the BSP sends it
+    return { ...base, kind: "text", text: title };
   }
 
   const raw = typeof msg.message === "string" ? msg.message.trim() : "";

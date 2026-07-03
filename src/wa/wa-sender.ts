@@ -68,10 +68,15 @@ export function buildWaSender(deps: {
         const opts = await deps.interakt.sendButtons(to, body, buttons);
         await deps.sessions.upsert({ phone: to, role: "customer", state: "CONFIRM_BOOKING", ctx: { demandId: demand.id }, lastOptions: opts });
       } catch {
-        await deps.interakt.sendTemplate(to, "sourcing_confirm",
-          [route(load), String(price), ownerName],
-          { "0": [buttons[0].id], "1": [buttons[1].id] });
-        await deps.sessions.upsert({ phone: to, role: "customer", state: "CONFIRM_BOOKING", ctx: { demandId: demand.id }, lastOptions: buttons });
+        // session send failed (likely outside the 24h window) — try the approved
+        // template. sendConfirm must never throw: on total failure the demand just
+        // stays CUSTOMER_PENDING and the dispatcher's next retry re-sends it.
+        try {
+          await deps.interakt.sendTemplate(to, "sourcing_confirm",
+            [route(load), String(price), ownerName],
+            { "0": [buttons[0].id], "1": [buttons[1].id] });
+          await deps.sessions.upsert({ phone: to, role: "customer", state: "CONFIRM_BOOKING", ctx: { demandId: demand.id }, lastOptions: buttons });
+        } catch { /* both sends failed — best-effort, skip session upsert */ }
       }
     },
 

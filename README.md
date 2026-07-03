@@ -129,17 +129,29 @@ the same **quotes/lock/counter pipeline** as voice calls. If a template send
 fails (network, message window, etc.), the system gracefully falls back to a
 voice call on the same load.
 
-**Three required templates** must be pre-approved in Interakt:
-- `sourcing_offer` — pitch the load at fixed price (body: {{1}}=price, {{2}}=lane).
-- `sourcing_confirm` — request pickup confirmation (body: {{1}}=lane, {{2}}=eta).
-- `sourcing_update` — notify driver of quote counter or final price (body: {{1}}=outcome).
+**Two required templates** must be pre-approved in Interakt (see `src/wa/wa-sender.ts`):
+
+| Template | Body variables | Buttons |
+|---|---|---|
+| `sourcing_offer` | {{1}} route ("Mumbai → Pune"), {{2}} vehicle type, {{3}} pickup date, {{4}} price (number, no ₹) | 3 quick-reply: Accept / My price / Not available — payload ids set per-send via `buttonValues` |
+| `sourcing_confirm` | {{1}} route, {{2}} agreed price, {{3}} driver name | 2 quick-reply: Confirm booking / Decline |
+
+`sourcing_update` is **not currently used** by the code (reserved, not required for approval).
 
 WhatsApp's **24-hour message window** applies: offers sent within 24 hours of the
 driver's last inbound message can use templates. Outside the window, fallback to
 voice.
 
+An owner's channel can be `voice`, `whatsapp`, or `both`. Today `both` behaves like
+**WhatsApp-with-voice-fallback-on-send-failure** — there's no parallel voice call, it
+only dials if the WhatsApp send itself throws (see `orchestrator.ts` `placeOne`).
+
+Concurrent offers to the same driver phone rely on the BSP echoing the tapped
+button's **payload id** back on `message_api_clicked`; if it only sends the button
+title, a tap resolves to the driver's latest offer (see `src/wa/inbound.ts`).
+
 **Setup:** Point Interakt webhook at `https://<PUBLIC_DOMAIN>/wa/inbound`, set
-`INTERAKT_API_KEY` + `INTERAKT_WEBHOOK_SECRET` in `.env`, submit the three
+`INTERAKT_API_KEY` + `INTERAKT_WEBHOOK_SECRET` in `.env`, submit the two
 templates for approval.
 
 ## Prerequisites

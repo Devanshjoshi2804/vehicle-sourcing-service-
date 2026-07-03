@@ -67,23 +67,33 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
   const state = session?.state ?? "IDLE";
 
   // ---- booking confirm (domino step 4) ----
-  if (state === "CONFIRM_BOOKING" && m.kind === "reply" && m.replyId) {
-    const [verb, demandId] = m.replyId.split(":");
-    const d = await deps.demandRepo.getById(demandId);
-    if (d && verb === "bok") {
-      const booked = await deps.demandRepo.book(d.id);
-      if (booked && d.loadId) await deps.loadsRepo.setStatus(d.loadId, "BOOKED");
-      await deps.sessions.clear(m.from);
-      await say(booked ? "🎉 Booked! The driver will call you before pickup." : "This booking is no longer pending.");
-      return;
+  if (state === "CONFIRM_BOOKING") {
+    const idMatch = m.kind === "reply" && m.replyId ? /^(bok|dec):([0-9a-f-]{36})$/i.exec(m.replyId) : null;
+    if (idMatch) {
+      try {
+        const [, verb, demandId] = idMatch;
+        const d = await deps.demandRepo.getById(demandId);
+        if (d && verb === "bok") {
+          const booked = await deps.demandRepo.book(d.id);
+          if (booked && d.loadId) await deps.loadsRepo.setStatus(d.loadId, "BOOKED");
+          await deps.sessions.clear(m.from);
+          await say(booked ? "🎉 Booked! The driver will call you before pickup." : "This booking is no longer pending.");
+          return;
+        }
+        if (d && verb === "dec") {
+          await deps.demandRepo.setStatus(d.id, "DECLINED");
+          if (d.loadId) await deps.loadsRepo.setStatus(d.loadId, "CLOSED");
+          await deps.sessions.clear(m.from);
+          await say("No problem — the booking is cancelled. Message us anytime for a new load.");
+          return;
+        }
+      } catch {
+        // don't crash-silence the customer — fall through to the nudge below
+      }
     }
-    if (d && verb === "dec") {
-      await deps.demandRepo.setStatus(d.id, "DECLINED");
-      if (d.loadId) await deps.loadsRepo.setStatus(d.loadId, "CLOSED");
-      await deps.sessions.clear(m.from);
-      await say("No problem — the booking is cancelled. Message us anytime for a new load.");
-      return;
-    }
+    // unmatched button id or free text: keep the session, don't leak into the intake parser
+    await say("Please tap ✅ Confirm booking or ❌ Decline above.");
+    return;
   }
 
   // ---- confirm-summary buttons ----

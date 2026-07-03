@@ -29,16 +29,15 @@ describe("full WA domino", () => {
   it("customer posts on WA → WA driver accepts → approve → WA confirm → customer books", async () => {
     const { pool } = await withTestDb();
     const { client, sent } = fakeInterakt();
-    const el = { originateCall: async () => ({ conversationId: `v${Math.random()}` }) };
+    const placed: any[] = [];
+    const el = { originateCall: async (a: any) => (placed.push(a), { conversationId: `v${placed.length}` }) };
     const app = buildServer({ pool, config, geo: fakeGeo as any, el: el as any, interakt: client });
 
     // WA-preference driver on the lane
     const owner = (await app.inject({ method: "POST", url: "/owners", headers: auth,
       payload: { name: "Ramesh", phone: "+919111111122", vehicleTypes: ["16ft"], lanes: [{ from: "Mumbai", to: "Pune" }], channel: "whatsapp" } })).json();
 
-    // customer posts a complete load in one message (LLM key unset → but all fields present via guided ids is long;
-    // simplest: post the demand through the same captureDemand path the flow uses, via /webhooks/report-demand channel field is voice —
-    // so instead simulate the WA confirm tap directly after a parsed draft: keep it simple and drive the guided flow)
+    // drive the guided WA intake flow end to end (no LLM key set in test config)
     await waMsg(app, "+919888888811", "need a truck", "m1");
     await settle();
     // guided: from, to, vehicle (list), date (tomorrow), price, confirm
@@ -66,6 +65,7 @@ describe("full WA domino", () => {
     // dispatcher approves → WA confirm goes to the customer (no voice call)
     await app.inject({ method: "POST", url: `/demand/${d.id}/approve-driver`, headers: auth });
     expect(sent.some((s) => (s.kind === "buttons" || s.kind === "template") && s.to === "919888888811" && /Book|found/i.test(String(s.args[0])))).toBe(true);
+    expect(placed).toHaveLength(0); // whole domino stayed on WhatsApp, no voice call placed
 
     // customer taps Confirm booking
     await waMsg(app, "+919888888811", JSON.stringify({ type: "button_reply", button_reply: { id: `bok:${d.id}`, title: "Confirm booking" } }), "m9");

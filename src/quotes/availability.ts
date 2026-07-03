@@ -80,13 +80,17 @@ export async function recordAvailability(
       );
       if (lockedDriver) {
         await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
-        await deps.orchestrator?.notifyFilled(call.loadId, call.ownerId);
+        try {
+          await deps.orchestrator?.notifyFilled(call.loadId, call.ownerId);
+        } catch { /* best-effort — a notify failure must not abort the lock */ }
         await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
         locked = true;
       }
     } else if (load && load.status === "CALLING") {
       await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
-      await deps.orchestrator?.notifyFilled(call.loadId, call.ownerId);
+      try {
+        await deps.orchestrator?.notifyFilled(call.loadId, call.ownerId);
+      } catch { /* best-effort — a notify failure must not abort the lock */ }
       await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
       locked = true;
     }

@@ -82,6 +82,21 @@ describe("customer flow", () => {
     expect((await loads.getLoad(load.id))!.status).toBe("BOOKED");
   });
 
+  it("free text while CONFIRM_BOOKING is nudged, session stays, no demand created", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent, sessions, demand } = await setup(pool);
+    const session = await sessions.upsert({
+      phone: "919888888833", role: "customer", state: "CONFIRM_BOOKING",
+      ctx: { demandId: "00000000-0000-0000-0000-000000000000" }, lastOptions: [],
+    });
+    const before = await demand.list();
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "yes" }) as any, session);
+    const after = await sessions.get("919888888833");
+    expect(after!.state).toBe("CONFIRM_BOOKING");
+    expect(sent.some((s) => s.kind === "text" && /Confirm booking|Decline/.test(s.args[0]))).toBe(true);
+    expect(await demand.list()).toEqual(before);
+  });
+
   it("free text mid-flow does not reset the draft", async () => {
     const { pool } = await withTestDb();
     const { deps, sent, sessions } = await setup(pool);
