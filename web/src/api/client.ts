@@ -34,6 +34,7 @@ export type Owner = {
   vehicleTypes: string[];
   lanes: Lane[];
   active: boolean;
+  channel: "voice" | "whatsapp" | "both";
   createdAt: string;
 };
 export type OwnerInput = {
@@ -41,6 +42,7 @@ export type OwnerInput = {
   phone: string;
   vehicleTypes: string[];
   lanes: Lane[];
+  channel?: "voice" | "whatsapp" | "both";
 };
 
 export type LoadStatus = "DRAFT" | "CALLING" | "LOCKED" | "BOOKED" | "CLOSED";
@@ -80,6 +82,7 @@ export type CallAttempt = {
   phone: string;
   flow: "offer" | "fixed_price_followup";
   status: CallStatus;
+  channel: "voice" | "wa";
   elConversationId: string | null;
   attemptNo: number;
   createdAt: string;
@@ -130,6 +133,7 @@ export type DemandRequest = {
   offeredPriceInr: number | null;
   pickupDate: string | null;
   status: DemandStatus;
+  channel: "voice" | "whatsapp" | "console";
   loadId: string | null;
   winningOwnerId: string | null;
   lockedPriceInr: number | null;

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Truck, Plus, MapPin, Circle, Route, Radio } from "lucide-react";
-import { api, OwnerInput } from "../api/client";
+import { api, Owner, OwnerInput } from "../api/client";
 import { usePolling } from "../hooks/usePolling";
 import { phoneShort } from "../lib/format";
 import { Button, Chip, Empty, Field, Panel } from "../components/ui";
@@ -94,15 +94,16 @@ export function DriversView() {
           <Empty icon={<Truck size={28} />} title="No drivers yet" hint="Add your vehicle owners — their lanes and vehicle types drive the auto-matcher." />
         ) : (
           <div className="divide-y divide-line/70">
-            <div className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto] gap-3 px-4 py-2.5 eyebrow">
+            <div className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto_auto] gap-3 px-4 py-2.5 eyebrow">
               <span>Driver</span>
               <span>Phone</span>
               <span>Vehicles</span>
               <span>Lanes</span>
+              <span>Channel</span>
               <span>Status</span>
             </div>
             {owners.map((o) => (
-              <div key={o.id} className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-panel2/40">
+              <div key={o.id} className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-panel2/40">
                 <span className="truncate text-[13px] font-600 text-fg">{o.name}</span>
                 <span className="font-mono text-[12px] tnum text-muted">{phoneShort(o.phone)}</span>
                 <span className="flex flex-wrap gap-1">
@@ -122,6 +123,15 @@ export function DriversView() {
                     ))
                   )}
                 </span>
+                <select
+                  value={o.channel}
+                  onChange={(e) => api.updateOwner(o.id, { channel: e.target.value as Owner["channel"] }).then(refresh)}
+                  className="rounded-lg border border-line bg-panel2 px-2 py-1 font-mono text-[11px] text-fg focus:border-brand focus:bg-panel focus:outline-none focus:ring-4 focus:ring-brand/10"
+                >
+                  <option value="voice">📞 Voice</option>
+                  <option value="whatsapp">💬 WhatsApp</option>
+                  <option value="both">📞💬 Both</option>
+                </select>
                 <span>
                   {o.active ? (
                     <Chip color="go" dot>Active</Chip>
