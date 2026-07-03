@@ -29,9 +29,12 @@ export function buildWaSender(deps: {
     // driver's reply back to this attempt through the normal quotes path.
     async sendOffer(attempt, load, owner, priceInr, flow) {
       const to = digits(owner.phone);
+      // Always all 3 buttons: the approved template has fixed button slots, so a
+      // 2-button send would map slot 1 ("My price") onto the no: payload. A counter
+      // on a follow-up/re-offer is a legitimate outcome anyway.
       const buttons = [
         { id: `acc:${attempt.id}:${priceInr}`, title: `Accept ${inr(priceInr)}`.slice(0, 20) },
-        ...(flow === "offer" ? [{ id: `ctr:${attempt.id}`, title: "My price" }] : []),
+        { id: `ctr:${attempt.id}`, title: "My price" },
         { id: `no:${attempt.id}`, title: "Not available" },
       ];
       await deps.interakt.sendTemplate(
