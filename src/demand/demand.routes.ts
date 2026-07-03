@@ -6,6 +6,7 @@ import { OwnersRepo } from "../owners/owners.repo.js";
 import { CallsRepo } from "../calls/calls.repo.js";
 import { CallOrchestrator } from "../calls/orchestrator.js";
 import { sourceDemand } from "./sourcing.js";
+import { WaSender } from "../wa/wa-sender.js";
 
 const STATUSES = [
   "NEW",
@@ -38,6 +39,7 @@ export function registerDemandRoutes(
     ownersRepo: OwnersRepo;
     callsRepo: CallsRepo;
     orchestrator: CallOrchestrator;
+    waSender?: WaSender;
   },
   preHandler: any,
 ) {
@@ -99,7 +101,18 @@ export function registerDemandRoutes(
     if (!d) return reply.code(404).send({ error: "not found" });
     const approved = await deps.demandRepo.approveValue(d.id);
     if (!approved) return reply.code(409).send({ error: `cannot approve from ${d.status}` });
-    if (approved.loadId) await deps.orchestrator.confirmCustomer(approved.loadId, approved.customerPhone, approved.id);
+    if (approved.loadId) {
+      const load = await deps.loadsRepo.getLoad(approved.loadId);
+      // Same-channel confirm: WA-intake demands get WhatsApp buttons; everything
+      // else keeps the voice confirm call.
+      if (approved.channel === "whatsapp" && deps.waSender && load) {
+        const owners = await deps.ownersRepo.getActiveOwners();
+        const winner = owners.find((o) => o.id === approved.winningOwnerId);
+        await deps.waSender.sendConfirm(approved, load, winner?.name ?? "our driver");
+      } else {
+        await deps.orchestrator.confirmCustomer(approved.loadId, approved.customerPhone, approved.id);
+      }
+    }
     return { status: "CUSTOMER_PENDING", loadId: approved.loadId };
   });
 
@@ -121,6 +134,9 @@ export function registerDemandRoutes(
       return reply.code(409).send({ error: `cannot cancel from ${d.status}` });
     await deps.demandRepo.setStatus(d.id, "CANCELLED");
     if (d.loadId) await deps.loadsRepo.setStatus(d.loadId, "CLOSED");
+    if (d.channel === "whatsapp" && deps.waSender) {
+      await deps.waSender.sendText(d.customerPhone, "We couldn't arrange this trip — our team may call you. You can post a new load here anytime. 🙏");
+    }
     return { status: "CANCELLED" };
   });
 

@@ -120,7 +120,7 @@ export function buildServer(deps: {
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
   registerCallRoutes(app, orchestrator, callsRepo, preHandler);
   registerQuoteRoutes(app, { quotesRepo, orchestrator }, preHandler);
-  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator }, preHandler);
+  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, waSender }, preHandler);
   registerWebhookRoutes(app, {
     quotesRepo,
     callsRepo,
