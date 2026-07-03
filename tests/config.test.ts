@@ -44,4 +44,14 @@ describe("loadConfig", () => {
     } as NodeJS.ProcessEnv);
     expect(cfg.waEnabled).toBe(false);
   });
+
+  it("WA_ENABLED=false disables WhatsApp even with a key", () => {
+    const cfg = loadConfig({
+      DATABASE_URL: "postgres://x", API_KEY: "k", WEBHOOK_SECRET: "w",
+      PUBLIC_BASE_URL: "https://h", ELEVENLABS_API_KEY: "el",
+      ELEVENLABS_AGENT_SOURCING: "a", ELEVENLABS_SIP_PHONE_ID: "p",
+      INTERAKT_API_KEY: "ik", WA_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.waEnabled).toBe(false);
+  });
 });

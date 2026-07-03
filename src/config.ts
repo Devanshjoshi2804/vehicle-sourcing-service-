@@ -41,7 +41,10 @@ const schema = z.object({
   INTERAKT_BASE_URL: z.string().default("https://api.interakt.ai/v1/public/message/"),
   INTERAKT_WEBHOOK_SECRET: z.string().optional(),
   INTERAKT_COUNTRY_CODE: z.string().default("+91"),
-  WA_ENABLED: z.coerce.boolean().default(true),
+  WA_ENABLED: z
+    .enum(["true", "false", "1", "0"])
+    .default("true")
+    .transform((v) => v === "true" || v === "1"),
   WA_REPLY_TTL_MIN: z.coerce.number().default(30),
   // LLM parse of free-text customer loads (optional — guided flow without it)
   GROQ_API_KEY: z.string().optional(),
