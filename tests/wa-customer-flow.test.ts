@@ -81,4 +81,27 @@ describe("customer flow", () => {
     expect((await demand.getById(d.id))!.status).toBe("BOOKED");
     expect((await loads.getLoad(load.id))!.status).toBe("BOOKED");
   });
+
+  it("free text mid-flow does not reset the draft", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent, sessions } = await setup(pool);
+    let parseCalls = 0;
+    // Second call (if the bug still ran parseLoad from scratch) returns a draft
+    // missing everything — that would prove the original fields got discarded.
+    (deps as any).parseLoad = async () => {
+      parseCalls++;
+      if (parseCalls === 1) return { fromText: "Mumbai", toText: "Pune", vehicleType: null, priceInr: 13000, pickupDate: "2026-07-05" };
+      return { fromText: null, toText: null, vehicleType: null, priceInr: null, pickupDate: null };
+    };
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "mumbai pune 13000" }) as any, null);
+    let session = await sessions.get("919888888833");
+    expect(session!.state).toBe("ASK_VEHICLE");
+    // customer types instead of tapping the list
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "something bigger than 14ft" }) as any, session);
+    session = await sessions.get("919888888833");
+    expect(parseCalls).toBe(1);                                    // parseLoad must not re-run mid-flow
+    expect(session!.state).toBe("ASK_VEHICLE");                    // still asking vehicle
+    expect((session!.ctx.draft as any).fromText).toBe("Mumbai");   // draft intact
+    expect(sent.filter((s) => s.kind === "list").length).toBe(2);  // list re-sent
+  });
 });

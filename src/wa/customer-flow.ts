@@ -135,6 +135,16 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
   if (state === "ASK_FROM" && m.kind === "text" && m.text) { draft.fromText = m.text; return prompt(deps, m.from, draft); }
   if (state === "ASK_TO" && m.kind === "text" && m.text) { draft.toText = m.text; return prompt(deps, m.from, draft); }
 
+  // ---- unrecognized reply mid-flow: re-prompt with the draft as-is, don't lose it ----
+  if (state === "ASK_VEHICLE" && m.kind === "text") {
+    await say("Please pick a vehicle from the list 👇");
+    return prompt(deps, m.from, draft);
+  }
+  if (state === "CONFIRM") {
+    await say("Please tap one of the buttons above 👆");
+    return prompt(deps, m.from, draft);
+  }
+
   // ---- fresh message: try the one-shot parse ----
   if (m.kind === "text" && m.text) {
     const p = await deps.parseLoad(m.text, todayIso());
