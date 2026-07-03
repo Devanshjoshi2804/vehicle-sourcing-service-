@@ -12,7 +12,7 @@ const config = loadConfig({
 const auth = { authorization: "Bearer k" };
 
 describe("wa channel in the orchestrator", () => {
-  it("whatsapp-preference owner gets a template offer, not a voice call", async () => {
+  it("whatsapp-preference owner gets a WA offer (session buttons first), not a voice call", async () => {
     const { pool } = await withTestDb();
     const { client, sent } = fakeInterakt();
     const placed: any[] = [];
@@ -26,7 +26,7 @@ describe("wa channel in the orchestrator", () => {
     await app.inject({ method: "POST", url: `/loads/${load.id}/call`, headers: auth, payload: { ownerIds: [owner.id] } });
 
     expect(placed).toHaveLength(0);
-    expect(sent.filter((s) => s.kind === "template")).toHaveLength(1);
+    expect(sent.filter((s) => s.kind === "buttons")).toHaveLength(1); // session send; template is the cold fallback
     const calls = (await app.inject({ method: "GET", url: `/loads/${load.id}/calls`, headers: auth })).json();
     expect(calls[0]).toMatchObject({ channel: "wa", status: "IN_PROGRESS" });
     expect(calls[0].elConversationId).toBe(`wa_${calls[0].id}`);
@@ -34,7 +34,7 @@ describe("wa channel in the orchestrator", () => {
 
   it("falls back to a voice call when the WA send fails", async () => {
     const { pool } = await withTestDb();
-    const { client } = fakeInterakt(true); // template send throws
+    const { client } = fakeInterakt(true); // buttons AND template sends throw
     const placed: any[] = [];
     const el = { originateCall: async (a: any) => (placed.push(a), { conversationId: `c${placed.length}` }) };
     const app = buildServer({ pool, config, el, interakt: client });

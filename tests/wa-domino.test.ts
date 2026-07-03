@@ -48,12 +48,13 @@ describe("full WA domino", () => {
     await waMsg(app, "+919888888811", "13000", "m6"); await settle();
     await waMsg(app, "+919888888811", JSON.stringify({ type: "button_reply", button_reply: { id: "cfm:yes", title: "✅ Confirm" } }), "m7"); await settle();
 
-    // demand sourced over WA: driver got a template offer
+    // demand sourced over WA: driver got a session-buttons offer (template is the cold-send fallback)
     const demands = (await app.inject({ method: "GET", url: "/demand", headers: auth })).json();
     expect(demands[0]).toMatchObject({ channel: "whatsapp", status: "SOURCING" });
-    const offer = sent.find((s) => s.kind === "template" && s.to === "919111111122");
+    const offer = sent.find((s) => (s.kind === "buttons" || s.kind === "template") && s.to === "919111111122");
     expect(offer).toBeTruthy();
-    const attemptId = (offer!.args[2]["0"][0] as string).split(":")[1]; // acc:<attemptId>:<price>
+    const offerButtons = offer!.kind === "buttons" ? offer!.args[1] : null;
+    const attemptId = (offerButtons ? (offerButtons[0].id as string) : (offer!.args[2]["0"][0] as string)).split(":")[1]; // acc:<attemptId>:<price>
 
     // driver taps Accept
     await waMsg(app, "+919111111122", JSON.stringify({ type: "button_reply", button_reply: { id: `acc:${attemptId}:13000`, title: "Accept" } }), "m8");

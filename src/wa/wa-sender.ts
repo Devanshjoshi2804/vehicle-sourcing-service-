@@ -37,12 +37,22 @@ export function buildWaSender(deps: {
         { id: `ctr:${attempt.id}`, title: "My price" },
         { id: `no:${attempt.id}`, title: "Not available" },
       ];
-      await deps.interakt.sendTemplate(
-        to,
-        "sourcing_offer",
-        [route(load), load.vehicleType, load.pickupDate, String(priceInr)],
-        Object.fromEntries(buttons.map((b, i) => [String(i), [b.id]])),
-      );
+      // Session buttons first (free, and works whenever the driver messaged us in
+      // the last 24h); the approved sourcing_offer template is the cold-send path.
+      try {
+        await deps.interakt.sendButtons(
+          to,
+          `🚛 New load — ${deps.config.companyName}\n${route(load)} · ${load.vehicleType} · pickup ${load.pickupDate}\nFreight: ${inr(priceInr)}\nInterested?`,
+          buttons,
+        );
+      } catch {
+        await deps.interakt.sendTemplate(
+          to,
+          "sourcing_offer",
+          [route(load), load.vehicleType, load.pickupDate, String(priceInr)],
+          Object.fromEntries(buttons.map((b, i) => [String(i), [b.id]])),
+        );
+      }
       await deps.callsRepo.setConversationId(attempt.id, `wa_${attempt.id}`);
       await deps.callsRepo.setStatus(attempt.id, "IN_PROGRESS");
       // template button clicks can come back title-only — remember the mapping
