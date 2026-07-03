@@ -117,6 +117,31 @@ Config lives in `voice-agent/config.py` (`SARVAM_*`, `GROQ_*`/`MISTRAL_*`/`GEMIN
 > `/webhooks/plivo-hangup` parses. The webhook routes are deliberately tolerant
 > (snake/camel keys, query+body, octet-stream) and always return 200.
 
+### WhatsApp channel
+
+**Interakt webhook integration** — owners can opt in to offers over WhatsApp
+alongside (or instead of) voice calls. Inbound WhatsApp messages land at
+`POST /wa/inbound` (verified with `INTERAKT_WEBHOOK_SECRET`), and the driver's
+first reply within `WA_REPLY_TTL_MIN` automatically captures their response.
+
+Each offer is created as a **call attempt** with `channel='wa'`, flowing through
+the same **quotes/lock/counter pipeline** as voice calls. If a template send
+fails (network, message window, etc.), the system gracefully falls back to a
+voice call on the same load.
+
+**Three required templates** must be pre-approved in Interakt:
+- `sourcing_offer` — pitch the load at fixed price (body: {{1}}=price, {{2}}=lane).
+- `sourcing_confirm` — request pickup confirmation (body: {{1}}=lane, {{2}}=eta).
+- `sourcing_update` — notify driver of quote counter or final price (body: {{1}}=outcome).
+
+WhatsApp's **24-hour message window** applies: offers sent within 24 hours of the
+driver's last inbound message can use templates. Outside the window, fallback to
+voice.
+
+**Setup:** Point Interakt webhook at `https://<PUBLIC_DOMAIN>/wa/inbound`, set
+`INTERAKT_API_KEY` + `INTERAKT_WEBHOOK_SECRET` in `.env`, submit the three
+templates for approval.
+
 ## Prerequisites
 
 - Node 20+
