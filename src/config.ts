@@ -35,6 +35,17 @@ const schema = z.object({
   // A call ringing / in-progress longer than this with no result is force-closed
   // by the watchdog (fixes calls stuck "on air" when no terminal webhook arrives).
   CALL_STALE_MINUTES: z.coerce.number().default(5),
+  // WhatsApp channel via Interakt (BSP). WA is enabled iff an API key is set
+  // AND WA_ENABLED isn't explicitly turned off.
+  INTERAKT_API_KEY: z.string().optional(),
+  INTERAKT_BASE_URL: z.string().default("https://api.interakt.ai/v1/public/message/"),
+  INTERAKT_WEBHOOK_SECRET: z.string().optional(),
+  INTERAKT_COUNTRY_CODE: z.string().default("+91"),
+  WA_ENABLED: z.coerce.boolean().default(true),
+  WA_REPLY_TTL_MIN: z.coerce.number().default(30),
+  // LLM parse of free-text customer loads (optional — guided flow without it)
+  GROQ_API_KEY: z.string().optional(),
+  GROQ_MODEL: z.string().default("llama-3.3-70b-versatile"),
 });
 
 export type Config = {
@@ -59,6 +70,14 @@ export type Config = {
   maxConcurrent: number;
   maxAttempts: number;
   callStaleMinutes: number;
+  interaktApiKey?: string;
+  interaktBaseUrl: string;
+  interaktWebhookSecret?: string;
+  interaktCountryCode: string;
+  waEnabled: boolean;
+  waReplyTtlMin: number;
+  groqApiKey?: string;
+  groqModel: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -85,5 +104,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxConcurrent: p.MAX_CONCURRENT,
     maxAttempts: p.MAX_ATTEMPTS,
     callStaleMinutes: p.CALL_STALE_MINUTES,
+    interaktApiKey: p.INTERAKT_API_KEY,
+    interaktBaseUrl: p.INTERAKT_BASE_URL,
+    interaktWebhookSecret: p.INTERAKT_WEBHOOK_SECRET,
+    interaktCountryCode: p.INTERAKT_COUNTRY_CODE,
+    waEnabled: Boolean(p.INTERAKT_API_KEY) && p.WA_ENABLED,
+    waReplyTtlMin: p.WA_REPLY_TTL_MIN,
+    groqApiKey: p.GROQ_API_KEY,
+    groqModel: p.GROQ_MODEL,
   };
 }
