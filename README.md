@@ -1,12 +1,19 @@
 # vehicle-sourcing-service
 
-Standalone service that calls truck/fleet owners over an outbound Hindi IVR
-(ElevenLabs ConvAI over a Plivo SIP trunk) to collect, for a dispatcher-posted
-load, each owner's **availability** and whether they accept the dispatcher's
-**fixed price**. Results come back as ranked quotes.
+Standalone service that calls truck/fleet owners over an outbound Hindi IVR to
+collect, for a load, each owner's **availability** and their **price** (accept
+the fixed price, or counter). Results come back as ranked quotes, and the whole
+thing can run as an automated "domino": a customer demand auto-sources drivers →
+first driver to accept locks the load → company approves the value → customer is
+called to confirm → booked.
+
+Three interchangeable voice backends sit behind one interface (`VOICE_PROVIDER`):
+**ElevenLabs ConvAI**, **Plivo CX** (hosted AgentFlow), and our **self-hosted
+voice agent on OVH** (Plivo media-stream → Sarvam Hindi STT/TTS → LLM). See
+[Architecture](#architecture).
 
 It is independent of the other repo microservices — its own Postgres, its own
-owner/load tables. It only reuses credentials (ElevenLabs, etc.).
+owner/load/demand tables. It only reuses credentials.
 
 ## Flow
 
@@ -19,11 +26,105 @@ owner/load tables. It only reuses credentials (ElevenLabs, etc.).
    auto-queued ("₹X is fixed, otherwise the booking can't be confirmed").
 7. `GET /loads/:id/quotes` — ranked: `available=YES & accepts_fixed=true` first.
 
+## Architecture
+
+Five containers ship as one deployment unit (`docker-compose.yml`), fronted by
+**Caddy** (auto-TLS reverse proxy) on three subdomains — one each for the API,
+the console, and the voice agent's `wss://` media stream.
+
+```
+                         ┌──────────────────────── Caddy (auto-TLS) ────────────────────────┐
+                         │   PUBLIC_DOMAIN → app     CONSOLE_DOMAIN → web    VOICE_DOMAIN → voice-agent
+                         └───────┬───────────────────────┬─────────────────────────┬─────────┘
+                                 │                        │                         │
+   Dispatcher ─── HTTPS ───▶  web (React SPA, nginx)      │                         │
+                                 │  Bearer $API_KEY        │                         │
+                                 ▼                         ▼                         │
+                          ┌─────────────── app (Fastify + TS + Zod) ──────────────┐ │
+                          │  owners · loads · demand · matcher · quotes · webhooks │ │
+                          │  calls/orchestrator  (concurrency-capped fan-out)      │ │
+                          │  VOICE_PROVIDER ─┬─ elevenlabs   (ConvAI + Plivo SIP)  │ │
+                          │                  ├─ plivo        (Plivo CX AgentFlow)  │ │
+                          │                  └─ plivo_native (Plivo Call API) ─────┼─┘
+                          └───────┬───────────────────────────────────▲───────────┘
+                                  │ SQL                                │ webhooks (quotes / outcomes)
+                                  ▼                                    │
+                            postgres:16                         voice providers
+                                                    ┌───────────────────┴───────────────────┐
+                                                    │ ElevenLabs ConvAI  │  Plivo CX AgentFlow │
+                                                    │ voice-agent (OVH, this repo) ◀── Plivo media-stream
+                                                    └────────────────────────────────────────┘
+```
+
+### Components
+
+- **`app`** — the Fastify API. Owns the domain (owners, loads, the demand
+  domino), the matcher (lane + vehicle ranking), and the **call orchestrator**
+  (concurrency-capped so we never exceed the Plivo trunk's outbound CPS). Voice
+  providers are hidden behind a common client interface selected by
+  `VOICE_PROVIDER`. Providers report results back over `/webhooks/*`.
+- **`postgres`** — its own DB; owner/load/demand/call/quote tables. Migrations in
+  `src/db/migrations` (`003_domino.sql` adds the domino state machine).
+- **`web`** — the dispatcher console (Vite + React + Tailwind), a static SPA
+  served by nginx. API base + key are baked in at build time.
+- **`voice-agent`** — the self-hosted OVH agent (below).
+- **`caddy`** — TLS termination + routing for all three subdomains.
+
+### Voice providers
+
+One interface, three swappable backends (`VOICE_PROVIDER`):
+
+| Value | Path | Notes |
+|---|---|---|
+| `elevenlabs` | ElevenLabs ConvAI agent over a Plivo SIP trunk | Original path. Hosted conversation; reports to `/webhooks/report-availability`. |
+| `plivo` | Plivo CX **AgentFlow** (hosted, cx.plivo.com) | Backend triggers the flow with call vars; the flow's **Hangup URL** callback carries outcomes to `/webhooks/plivo-hangup` (Plivo's in-call HTTP action sends empty bodies — see note). |
+| `plivo_native` | Plivo Call API → our OVH agent | `answer_url` points at the OVH agent's `/answer-outbound`; full control, lowest cost (~₹2/min all-in). |
+
+### The OVH self-hosted voice agent
+
+`voice-agent/` is a **FastAPI** service we run on an OVH box **in India** — this
+matters: Plivo terminates the call in India and streams the media to us there, so
+the audio never leaves the country (avoids the domestic-anchoring rejection).
+
+**Media path.** Plivo hits `/answer` (inbound customer) or `/answer-outbound`
+(outbound driver call) and gets back Plivo **Stream XML** pointing at
+`wss://VOICE_DOMAIN/stream`. Plivo then opens a **bidirectional WebSocket** and
+streams **8 kHz μ-law** audio both ways. Load context (owner, lane, price, flow)
+rides in on the answer-URL query params and is forwarded into the stream URL
+(`&` must be XML-escaped or Plivo rejects the doc as "Invalid Answer XML").
+
+**Pipeline** (`pipeline.py`). Per call: VAD-gated turn detection
+(`webrtcvad`) → **Sarvam** `saarika` STT (Indian-telephony-tuned) → LLM (Groq /
+Mistral / Gemini, keys tried in order, rotate on 429) → **Sarvam** `bulbul:v2`
+TTS rendered at 22050 Hz and downsampled (fixes the earlier muffled/robotic
+voice), speaking **Devanagari** for correct pronunciation. **Barge-in** lets the
+caller interrupt mid-sentence (cancellable speak task + `clearAudio`); disable
+with `BARGE_IN=0` if telephony echo makes it self-interrupt.
+
+**Two modes.**
+- `intake` (inbound) — a customer describes a load; the agent normalizes it and
+  POSTs `/webhooks/report-demand`, which kicks off the domino.
+- `offer` (outbound) — the agent pitches a load to a driver at the fixed (or
+  re-offered) price and reports availability + quoted price to
+  `/webhooks/report-availability`.
+
+Config lives in `voice-agent/config.py` (`SARVAM_*`, `GROQ_*`/`MISTRAL_*`/`GEMINI_*`,
+`PUBLIC_WSS_HOST`, `BACKEND_BASE`, `BARGE_IN`).
+
+> **Plivo CX caveat.** Plivo's in-call HTTP Request action sends `Content-Length: 0`
+> (empty) bodies — a platform bug. The workaround is to carry the full outcome in
+> the flow's **Hangup URL** event callback (`data.object.event_data`), which
+> `/webhooks/plivo-hangup` parses. The webhook routes are deliberately tolerant
+> (snake/camel keys, query+body, octet-stream) and always return 200.
+
 ## Prerequisites
 
 - Node 20+
 - Postgres 14+ (local or Docker)
-- ElevenLabs ConvAI agent + Plivo SIP trunk — see `docs/elevenlabs-agent-setup.md`
+- One voice provider configured:
+  - ElevenLabs ConvAI agent + Plivo SIP trunk — see `docs/elevenlabs-agent-setup.md`, **or**
+  - Plivo CX AgentFlow, **or**
+  - the self-hosted agent (`voice-agent/`, Python 3.11+) with a Sarvam key + an LLM key
 
 ## Setup
 
