@@ -101,6 +101,7 @@ export function registerWebhookRoutes(
     callsRepo: deps.callsRepo,
     loadsRepo: deps.loadsRepo,
     demandRepo: deps.demandRepo,
+    orchestrator: deps.orchestrator,
   };
 
   const firstOf = (o: any, ...keys: string[]) => {

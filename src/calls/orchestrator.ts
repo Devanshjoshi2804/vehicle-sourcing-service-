@@ -7,6 +7,7 @@ import { CallsRepo, CallAttempt, CallFlow } from "./calls.repo.js";
 import { Load } from "../loads/loads.schema.js";
 import { Owner } from "../owners/owners.schema.js";
 import { buildDynamicVars } from "./dynamic-vars.js";
+import { WaSender } from "../wa/wa-sender.js";
 
 type Deps = {
   pool: pg.Pool;
@@ -15,6 +16,7 @@ type Deps = {
   ownersRepo: OwnersRepo;
   loadsRepo: LoadsRepo;
   callsRepo: CallsRepo;
+  waSender?: WaSender;
 };
 
 export class CallOrchestrator {
@@ -35,11 +37,13 @@ export class CallOrchestrator {
     for (const ownerId of ownerIds) {
       const owner = byId.get(ownerId);
       if (!owner) continue;
+      const wantsWa = !!this.d.waSender && owner.channel !== "voice";
       const attempt = await this.d.callsRepo.create({
         loadId,
         ownerId,
         phone: owner.phone,
         flow,
+        channel: wantsWa ? "wa" : "voice",
       });
       attempts.push(attempt);
     }
@@ -92,6 +96,19 @@ export class CallOrchestrator {
   }
 
   private async placeOne(a: CallAttempt, load: Load, owner: Owner, flow: CallFlow, offerPriceInr?: number) {
+    // WhatsApp-preference owners get a message instead of a call; if the send
+    // fails (e.g. template not approved yet) fall back to a voice call so nobody
+    // is skipped. ponytail: 'both' == 'whatsapp' for now; voice-after-TTL later.
+    if (a.channel === "wa" && this.d.waSender) {
+      try {
+        const priceInr = offerPriceInr ?? load.fixedPriceInr;
+        await this.d.waSender.sendOffer(a, load, owner, priceInr, flow);
+        return;
+      } catch {
+        await this.d.callsRepo.setChannel(a.id, "voice");
+        a = { ...a, channel: "voice" };
+      }
+    }
     const vars = buildDynamicVars(load, owner, flow, this.d.config.companyName, offerPriceInr);
     for (let attempt = 1; attempt <= this.d.config.maxAttempts; attempt++) {
       // First-accept-wins: a driver may have locked this load while this call sat
@@ -113,5 +130,15 @@ export class CallOrchestrator {
         }
       }
     }
+  }
+
+  // Losing WA drivers get a "filled" notice when someone locks the load.
+  // Must run BEFORE supersedePending flips their live status.
+  async notifyFilled(loadId: string, exceptOwnerId: string): Promise<void> {
+    if (!this.d.waSender) return;
+    const load = await this.d.loadsRepo.getLoad(loadId);
+    if (!load) return;
+    const peers = await this.d.callsRepo.listLivePeersByLoad(loadId, exceptOwnerId);
+    for (const p of peers.filter((p) => p.channel === "wa")) await this.d.waSender.sendFilled(p.phone, load);
   }
 }

@@ -77,6 +77,10 @@ export class CallsRepo {
     ]);
   }
 
+  async setChannel(id: string, channel: CallChannel): Promise<void> {
+    await this.pool.query(`UPDATE call_attempts SET channel=$2 WHERE id=$1`, [id, channel]);
+  }
+
   async getById(id: string): Promise<CallAttempt | null> {
     const { rows } = await this.pool.query(`SELECT * FROM call_attempts WHERE id=$1`, [id]);
     return rows[0] ? rowToCall(rows[0]) : null;

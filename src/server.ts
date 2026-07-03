@@ -20,12 +20,16 @@ import { registerDemandRoutes } from "./demand/demand.routes.js";
 import { buildGeoResolver, GeoResolver } from "./geo/geo.js";
 import { registerPlivoRoutes } from "./plivo/plivo.routes.js";
 import { requireApiKey } from "./auth.js";
+import { buildInteraktClient, InteraktClient } from "./wa/interakt.client.js";
+import { WaSessionsRepo } from "./wa/wa-sessions.repo.js";
+import { buildWaSender } from "./wa/wa-sender.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
   config: Config;
   el?: ElevenLabsClient;
   geo?: GeoResolver;
+  interakt?: InteraktClient;
 }): FastifyInstance {
   const app = Fastify({ logger: true });
   // Some webhook providers (Plivo CX) send Content-Type: application/json with an
@@ -77,6 +81,11 @@ export function buildServer(deps: {
       : deps.config.voiceProvider === "plivo"
         ? buildPlivoCxClient(deps.config)
         : buildElevenLabsClient(deps.config));
+  const waSessions = new WaSessionsRepo(deps.pool);
+  const interakt = deps.interakt ?? (deps.config.waEnabled ? buildInteraktClient(deps.config) : undefined);
+  const waSender = interakt
+    ? buildWaSender({ interakt, callsRepo, sessions: waSessions, config: deps.config })
+    : undefined;
   const orchestrator = new CallOrchestrator({
     pool: deps.pool,
     config: deps.config,
@@ -84,6 +93,7 @@ export function buildServer(deps: {
     ownersRepo,
     loadsRepo,
     callsRepo,
+    waSender,
   });
 
   const quotesRepo = new QuotesRepo(deps.pool);

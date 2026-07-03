@@ -8,6 +8,7 @@ export type AvailabilityDeps = {
   callsRepo: CallsRepo;
   loadsRepo: LoadsRepo;
   demandRepo: DemandRepo;
+  orchestrator?: { notifyFilled(loadId: string, exceptOwnerId: string): Promise<void> };
 };
 
 export type AvailabilityResult = {
@@ -79,11 +80,13 @@ export async function recordAvailability(
       );
       if (lockedDriver) {
         await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
+        await deps.orchestrator?.notifyFilled(call.loadId, call.ownerId);
         await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
         locked = true;
       }
     } else if (load && load.status === "CALLING") {
       await deps.loadsRepo.setStatus(call.loadId, "LOCKED");
+      await deps.orchestrator?.notifyFilled(call.loadId, call.ownerId);
       await deps.callsRepo.supersedePending(call.loadId, call.ownerId);
       locked = true;
     }
