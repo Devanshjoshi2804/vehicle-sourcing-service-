@@ -77,3 +77,21 @@ describe("driver flow", () => {
     expect(sent.filter((s) => s.kind === "text").length).toBe(1); // re-ask, no quote
   });
 });
+
+describe("accept after counter", () => {
+  it("upgrades the quote to accepts_fixed and locks the load", async () => {
+    const { pool } = await withTestDb();
+    const { deps, attempt, quotes, load } = await setup(pool);
+    // driver counters first
+    const session = { phone: "919111111155", role: "driver", state: "AWAIT_PRICE", ctx: { attemptId: attempt.id }, lastOptions: [] };
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "text", text: "14000" }) as any, session as any);
+    let qs = await quotes.listByLoad(load.id);
+    expect(qs[0]).toMatchObject({ acceptsFixed: false, quotedPriceInr: 14000 });
+    // then taps Accept on the original offer
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "reply", replyId: `acc:${attempt.id}:13000` }) as any, null);
+    qs = await quotes.listByLoad(load.id);
+    expect(qs[0].acceptsFixed).toBe(true);
+    const { LoadsRepo } = await import("../src/loads/loads.repo.js");
+    expect((await new LoadsRepo(pool).getLoad(load.id))!.status).toBe("LOCKED");
+  });
+});

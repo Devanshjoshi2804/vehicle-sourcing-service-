@@ -50,6 +50,20 @@ export function registerWaRoutes(
 
         const fresh = await deps.sessions.get(m.from);
         const owner = await deps.ownersRepo.findByPhoneDigits(m.from);
+
+        // Interakt delivers one button tap as TWO events (the message + a
+        // button-click status) with DIFFERENT message ids, so msgId dedup can't
+        // catch it. Dedup on the resolved action within a short window instead.
+        const actionKey = m.kind === "reply" ? `r:${m.replyId}` : `t:${(m.text ?? "").trim().toLowerCase()}`;
+        const last = (fresh?.ctx as any)?.lastInbound;
+        if (last?.key === actionKey && Date.now() - Number(last.ts) < 45_000) return;
+        await deps.sessions.upsert({
+          phone: m.from,
+          role: fresh?.role ?? (owner ? "driver" : "customer"),
+          state: fresh?.state ?? "IDLE",
+          ctx: { lastInbound: { key: actionKey, ts: Date.now() } },
+        });
+
         if (owner || fresh?.role === "driver") await handleDriverMessage(deps.driver, m, fresh);
         else await handleCustomerMessage(deps.customer, m, fresh);
       } catch (e) {

@@ -41,8 +41,21 @@ export class WaSessionsRepo {
     return rowToSession(rows[0]);
   }
 
+  // "Clear" ends the active flow but KEEPS the row: processed_ids keep deduping
+  // webhook redeliveries, last_options keep buttons on older messages resolvable
+  // (the provider echoes only the tapped title), and lastInbound survives so a
+  // redelivery of the action that ENDED the flow is still deduped.
   async clear(phone: string): Promise<void> {
-    await this.pool.query(`DELETE FROM wa_sessions WHERE phone=$1`, [phone]);
+    await this.pool.query(
+      `UPDATE wa_sessions
+         SET state='IDLE',
+             ctx = CASE WHEN ctx ? 'lastInbound'
+                        THEN jsonb_build_object('lastInbound', ctx->'lastInbound')
+                        ELSE '{}'::jsonb END,
+             updated_at=now()
+       WHERE phone=$1`,
+      [phone],
+    );
   }
 
   // Idempotency for Interakt redeliveries: false = already seen. Keeps last 20 ids.

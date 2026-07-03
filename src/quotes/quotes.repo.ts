@@ -67,6 +67,21 @@ export class QuotesRepo {
     return { created: (rowCount ?? 0) > 0 };
   }
 
+  // Explicit re-answer on an existing conversation (e.g. a driver who countered
+  // and then taps Accept): upgrade the quote in place. False = no quote to update.
+  async updateByConversation(q: QuoteInput): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE quotes SET
+         available=$2,
+         quoted_price_inr=COALESCE($3, quoted_price_inr),
+         accepts_fixed=$4,
+         note=COALESCE($5, note)
+       WHERE el_conversation_id=$1`,
+      [q.elConversationId, q.available, q.quotedPriceInr ?? null, q.acceptsFixed ?? null, q.note ?? null],
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
   async attachTranscript(conversationId: string, transcript: string): Promise<void> {
     await this.pool.query(`UPDATE quotes SET transcript=$2 WHERE el_conversation_id=$1`, [
       conversationId,

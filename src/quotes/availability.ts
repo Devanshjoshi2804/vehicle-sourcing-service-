@@ -33,6 +33,9 @@ export async function recordAvailability(
     vehicleType?: string | null;
     note?: string | null;
     lockPriceInr?: number | null;
+    // Explicit user action on an existing conversation (a driver who countered
+    // then taps Accept): upgrade the stored quote instead of ignoring the repeat.
+    allowUpdate?: boolean;
   },
 ): Promise<AvailabilityResult> {
   if (!f.cid) return { ok: false, reason: "no conversationId" };
@@ -52,7 +55,7 @@ export async function recordAvailability(
     else if (availableProvided && available === "YES") acceptsFixed = true;
   }
 
-  const { created } = await deps.quotesRepo.upsertByConversation({
+  const quote = {
     loadId: call.loadId,
     ownerId: call.ownerId,
     callAttemptId: call.id,
@@ -62,14 +65,18 @@ export async function recordAvailability(
     acceptsFixed,
     vehicleType: f.vehicleType ?? null,
     note: f.note ?? null,
-  });
+  };
+  const { created } = await deps.quotesRepo.upsertByConversation(quote);
+  // The lock ops below are individually race-safe (conditional UPDATEs), so an
+  // allowUpdate re-answer can run them again without double-locking.
+  const effective = created || (!created && f.allowUpdate === true && (await deps.quotesRepo.updateByConversation(quote)));
 
   // NOTE: a counter (available YES, acceptsFixed false) is NOT auto-recalled.
   // The dispatcher decides on the board: "Accept ₹<counter>" or "Hold ₹<fixed>"
   // (the Hold button triggers a fixed_price_followup manually). Auto-recalling
   // was confusing — it called the driver twice with the same conversation.
   let locked = false;
-  if (created && available === "YES" && acceptsFixed === true) {
+  if (effective && available === "YES" && acceptsFixed === true) {
     const load = await deps.loadsRepo.getLoad(call.loadId);
     const demand = await deps.demandRepo.findByLoadId(call.loadId);
     if (demand) {

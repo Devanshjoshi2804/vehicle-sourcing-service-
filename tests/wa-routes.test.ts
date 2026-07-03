@@ -66,3 +66,24 @@ describe("POST /wa/inbound", () => {
     expect(sent.some((s) => s.kind === "text" && /load matches your route/i.test(s.args[0]))).toBe(true);
   });
 });
+
+describe("double-delivery dedup", () => {
+  it("processes one button tap only once across two events with different msg ids", async () => {
+    const { pool } = await withTestDb();
+    const { client, sent } = fakeInterakt();
+    const app = buildServer({ pool, config, interakt: client, el: { originateCall: async () => ({ conversationId: "c" }) } as any });
+    // seed a session so the tap has context (title irrelevant — id carries the action)
+    const reply = JSON.stringify({ type: "button_reply", button_reply: { id: "veh:16ft", title: "16ft" } });
+    const payload = (id: string) => ({
+      type: "message_received",
+      data: { customer: { channel_phone_number: "+919888888844", traits: { name: "C" } },
+              message: { id, message_content_type: "Text", message: reply } },
+    });
+    await post(app, payload("dup_a"));
+    await new Promise((r) => setTimeout(r, 120));
+    const n = sent.length;
+    await post(app, payload("dup_b")); // same tap, different message id (Interakt double delivery)
+    await new Promise((r) => setTimeout(r, 120));
+    expect(sent.length).toBe(n); // second delivery ignored
+  });
+});

@@ -16,7 +16,11 @@ describe("wa sessions", () => {
     expect(s!.ctx).toMatchObject({ fromText: "Mumbai" }); // ctx merges, not replaced
     expect(s!.lastOptions[0].id).toBe("ok");
     await repo.clear("911");
-    expect(await repo.get("911")).toBeNull();
+    const cleared = await repo.get("911");
+    // clear keeps the row: IDLE state, ctx reset, lastOptions preserved for
+    // resolving taps on older messages, processed_ids preserved for dedup
+    expect(cleared).toMatchObject({ state: "IDLE", ctx: {} });
+    expect(cleared!.lastOptions[0].id).toBe("ok");
   });
 
   it("markProcessed dedupes message ids", async () => {

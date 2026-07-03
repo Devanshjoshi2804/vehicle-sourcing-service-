@@ -41,8 +41,10 @@ export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, se
 
       if (verb === "acc") {
         const price = Number(priceStr) || undefined;
+        // allowUpdate: a driver who countered first can still tap Accept — the
+        // stored quote upgrades to accepts_fixed and the lock runs.
         const r = await recordAvailability(deps.availability, {
-          cid, available: "YES", acceptsFixed: true, lockPriceInr: price ?? null,
+          cid, available: "YES", acceptsFixed: true, lockPriceInr: price ?? null, allowUpdate: true,
         });
         await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
         await deps.sessions.clear(m.from);
