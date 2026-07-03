@@ -23,6 +23,8 @@ import { requireApiKey } from "./auth.js";
 import { buildInteraktClient, InteraktClient } from "./wa/interakt.client.js";
 import { WaSessionsRepo } from "./wa/wa-sessions.repo.js";
 import { buildWaSender } from "./wa/wa-sender.js";
+import { registerWaRoutes } from "./wa/wa.routes.js";
+import { buildLoadParser } from "./wa/llm-parse.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
@@ -32,6 +34,20 @@ export function buildServer(deps: {
   interakt?: InteraktClient;
 }): FastifyInstance {
   const app = Fastify({ logger: true });
+  // Interakt signs /wa/inbound with an HMAC of the RAW body; the JSON content-type
+  // parser below only hands handlers the parsed object, so capture the raw bytes
+  // for this one route before parsing.
+  app.addHook("preParsing", async (req, _reply, payload) => {
+    if (req.url === "/wa/inbound") {
+      const chunks: Buffer[] = [];
+      for await (const c of payload) chunks.push(Buffer.from(c));
+      const raw = Buffer.concat(chunks);
+      (req as any).rawBody = raw;
+      const { Readable } = await import("node:stream");
+      return Readable.from(raw);
+    }
+    return payload;
+  });
   // Some webhook providers (Plivo CX) send Content-Type: application/json with an
   // EMPTY body and put the data in the query string instead. Default Fastify 400s
   // on the empty body; treat empty as {} so the handler can read req.query.
@@ -115,5 +131,17 @@ export function buildServer(deps: {
     geo,
     secret: deps.config.webhookSecret,
   });
+
+  if (interakt && waSender) {
+    const availability = { quotesRepo, callsRepo, loadsRepo, demandRepo, orchestrator };
+    const capture = { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, geo };
+    registerWaRoutes(app, {
+      config: deps.config,
+      sessions: waSessions,
+      ownersRepo,
+      driver: { availability, interakt, sessions: waSessions, callsRepo, loadsRepo, config: deps.config },
+      customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config },
+    });
+  }
   return app;
 }
