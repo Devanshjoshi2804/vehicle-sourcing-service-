@@ -7,7 +7,7 @@ import { DemandRepo } from "../demand/demand.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
 import { OwnersRepo } from "../owners/owners.repo.js";
 import { GeoResolver } from "../geo/geo.js";
-import { sourceDemand } from "../demand/sourcing.js";
+import { captureDemand } from "../demand/sourcing.js";
 import { recordAvailability } from "../quotes/availability.js";
 
 // Tolerant on field naming/types: our OVH agent sends camelCase, Plivo CX sends
@@ -95,6 +95,7 @@ export function registerWebhookRoutes(
     callsRepo: deps.callsRepo,
     orchestrator: deps.orchestrator,
   };
+  const captureDeps = { ...sourcingDeps, geo: deps.geo };
 
   const availabilityDeps = {
     quotesRepo: deps.quotesRepo,
@@ -116,36 +117,20 @@ export function registerWebhookRoutes(
     const parsed = ReportDemandSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const b = parsed.data;
-    // Keep pickupDate only if it's a real YYYY-MM-DD; otherwise stash the raw
-    // phrase ("kal", "5 July") in the note so a human can read it on approval.
-    const isoDate = b.pickupDate && /^\d{4}-\d{2}-\d{2}$/.test(b.pickupDate) ? b.pickupDate : null;
-    const rawDateNote = b.pickupDate && !isoDate ? `date said: ${b.pickupDate}` : null;
-    const note = [b.note, rawDateNote].filter(Boolean).join("; ") || null;
 
-    const [fromResolved, toResolved] = await Promise.all([
-      deps.geo.resolveLocation(b.fromText),
-      deps.geo.resolveLocation(b.toText),
-    ]);
-    const { created, demand } = await deps.demandRepo.upsertByConversation({
+    // Domino step 1 — geocode + upsert (idempotent) + auto-source when complete.
+    const { created, demand, sourcing } = await captureDemand(captureDeps, {
       customerPhone: b.customerPhone || "unknown",
       fromText: b.fromText,
       toText: b.toText,
-      fromResolved,
-      toResolved,
       vehicleType: b.vehicleType ?? null,
       offeredPriceInr: b.offeredPriceInr ?? null,
-      pickupDate: isoDate,
-      elConversationId:
+      pickupDate: b.pickupDate ?? null,
+      conversationId:
         b.conversationId || `ext_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      note,
+      channel: "voice",
+      note: b.note ?? null,
     });
-
-    // Domino step 1 — auto-source the drivers (only on first capture, only if complete).
-    let sourcing: { sourced: boolean; reason?: string; loadId?: string; calledOwners?: number } = {
-      sourced: false,
-      reason: "duplicate",
-    };
-    if (created) sourcing = await sourceDemand(sourcingDeps, demand);
 
     return reply.code(created ? 201 : 200).send({
       created,

@@ -1,10 +1,11 @@
-import { DemandRepo, DemandRequest } from "./demand.repo.js";
+import { DemandChannel, DemandRepo, DemandRequest } from "./demand.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
 import { OwnersRepo } from "../owners/owners.repo.js";
 import { CallsRepo } from "../calls/calls.repo.js";
 import { CallOrchestrator } from "../calls/orchestrator.js";
 import { matchOwners } from "../matcher/matcher.js";
 import { Owner } from "../owners/owners.schema.js";
+import { GeoResolver } from "../geo/geo.js";
 
 export type SourcingDeps = {
   demandRepo: DemandRepo;
@@ -13,6 +14,8 @@ export type SourcingDeps = {
   callsRepo: CallsRepo;
   orchestrator: CallOrchestrator;
 };
+
+export type CaptureDeps = SourcingDeps & { geo: GeoResolver };
 
 function tomorrow(): string {
   const d = new Date();
@@ -85,4 +88,58 @@ export async function sourceDemand(
   await deps.demandRepo.setStatus(demand.id, "SOURCING");
   if (ownerIds.length) await deps.orchestrator.enqueue(loadId, ownerIds, "offer");
   return { sourced: true, loadId, calledOwners: ownerIds.length };
+}
+
+// Shared demand intake: geocode the two free-text places, tame the pickup date
+// (keep it only if it's a real YYYY-MM-DD, otherwise stash the raw phrase in the
+// note), upsert (idempotent on conversationId), and auto-source when the demand
+// is already complete enough. Used by the voice report-demand webhook and the
+// WhatsApp customer flow — same rules, different channel tag.
+export async function captureDemand(
+  deps: CaptureDeps,
+  input: {
+    customerPhone: string;
+    fromText: string;
+    toText: string;
+    vehicleType?: string | null;
+    offeredPriceInr?: number | null;
+    pickupDate?: string | null;
+    conversationId: string;
+    channel?: DemandChannel;
+    note?: string | null;
+  },
+): Promise<{
+  created: boolean;
+  demand: DemandRequest;
+  sourcing: { sourced: boolean; reason?: string; calledOwners?: number };
+}> {
+  const isoDate = isIsoDate(input.pickupDate) ? input.pickupDate : null;
+  const rawDateNote = input.pickupDate && !isoDate ? `date said: ${input.pickupDate}` : null;
+  const note = [input.note, rawDateNote].filter(Boolean).join("; ") || null;
+
+  const [fromResolved, toResolved] = await Promise.all([
+    deps.geo.resolveLocation(input.fromText),
+    deps.geo.resolveLocation(input.toText),
+  ]);
+  const { created, demand } = await deps.demandRepo.upsertByConversation({
+    customerPhone: input.customerPhone,
+    fromText: input.fromText,
+    toText: input.toText,
+    fromResolved,
+    toResolved,
+    vehicleType: input.vehicleType ?? null,
+    offeredPriceInr: input.offeredPriceInr ?? null,
+    pickupDate: isoDate,
+    elConversationId: input.conversationId,
+    channel: input.channel ?? "voice",
+    note,
+  });
+
+  // Only source on first capture (a duplicate conversationId is a no-op).
+  let sourcing: { sourced: boolean; reason?: string; calledOwners?: number } = {
+    sourced: false,
+    reason: "duplicate",
+  };
+  if (created) sourcing = await sourceDemand(deps, demand);
+  return { created, demand, sourcing };
 }

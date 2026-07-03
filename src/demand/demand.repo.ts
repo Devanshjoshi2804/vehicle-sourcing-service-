@@ -19,6 +19,8 @@ export type DemandStatus =
   | "DECLINED"
   | "CANCELLED";
 
+export type DemandChannel = "voice" | "whatsapp" | "console";
+
 export type DemandInput = {
   customerPhone: string;
   fromText: string;
@@ -29,6 +31,7 @@ export type DemandInput = {
   offeredPriceInr?: number | null;
   pickupDate?: string | null;
   elConversationId: string;
+  channel?: DemandChannel;
   note?: string | null;
 };
 
@@ -43,6 +46,7 @@ export type DemandRequest = {
   offeredPriceInr: number | null;
   pickupDate: string | null;
   status: DemandStatus;
+  channel: DemandChannel;
   loadId: string | null;
   winningOwnerId: string | null;
   lockedPriceInr: number | null;
@@ -67,6 +71,7 @@ function rowToDemand(r: any): DemandRequest {
     pickupDate:
       r.pickup_date instanceof Date ? r.pickup_date.toISOString().slice(0, 10) : r.pickup_date,
     status: r.status,
+    channel: r.channel,
     loadId: r.load_id,
     winningOwnerId: r.winning_owner_id ?? null,
     lockedPriceInr: r.locked_price_inr ?? null,
@@ -87,8 +92,8 @@ export class DemandRepo {
     const inserted = await this.pool.query(
       `INSERT INTO demand_requests
          (customer_phone, from_text, to_text, from_resolved, to_resolved, vehicle_type,
-          offered_price_inr, pickup_date, el_conversation_id, note)
-       VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10)
+          offered_price_inr, pickup_date, el_conversation_id, note, channel)
+       VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (el_conversation_id) WHERE el_conversation_id IS NOT NULL DO NOTHING
        RETURNING *`,
       [
@@ -102,6 +107,7 @@ export class DemandRepo {
         i.pickupDate ?? null,
         i.elConversationId,
         i.note ?? null,
+        i.channel ?? "voice",
       ],
     );
     if (inserted.rows[0]) return { created: true, demand: rowToDemand(inserted.rows[0]) };
