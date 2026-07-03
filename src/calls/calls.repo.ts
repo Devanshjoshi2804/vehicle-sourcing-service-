@@ -12,12 +12,14 @@ export type CallStatus =
   | "FAILED"
   | "SUPERSEDED";
 const LIVE_STATUSES = ["QUEUED", "DIALING", "IN_PROGRESS"] as const;
+export type CallChannel = "voice" | "wa";
 export type NewCallAttempt = {
   loadId: string;
   ownerId: string;
   phone: string;
   flow: CallFlow;
   attemptNo?: number;
+  channel?: CallChannel;
 };
 export type CallAttempt = {
   id: string;
@@ -30,6 +32,7 @@ export type CallAttempt = {
   attemptNo: number;
   createdAt: string;
   endedAt: string | null;
+  channel: CallChannel;
 };
 
 function rowToCall(r: any): CallAttempt {
@@ -44,6 +47,7 @@ function rowToCall(r: any): CallAttempt {
     attemptNo: r.attempt_no,
     createdAt: r.created_at.toISOString(),
     endedAt: r.ended_at ? r.ended_at.toISOString() : null,
+    channel: r.channel,
   };
 }
 
@@ -52,9 +56,9 @@ export class CallsRepo {
 
   async create(a: NewCallAttempt): Promise<CallAttempt> {
     const { rows } = await this.pool.query(
-      `INSERT INTO call_attempts(load_id,owner_id,phone,flow,attempt_no,status)
-       VALUES ($1,$2,$3,$4,$5,'QUEUED') RETURNING *`,
-      [a.loadId, a.ownerId, a.phone, a.flow, a.attemptNo ?? 1],
+      `INSERT INTO call_attempts(load_id,owner_id,phone,flow,attempt_no,status,channel)
+       VALUES ($1,$2,$3,$4,$5,'QUEUED',$6) RETURNING *`,
+      [a.loadId, a.ownerId, a.phone, a.flow, a.attemptNo ?? 1, a.channel ?? "voice"],
     );
     return rowToCall(rows[0]);
   }
@@ -108,14 +112,24 @@ export class CallsRepo {
   // Watchdog: a call that's been ringing / in-progress past the timeout never got
   // a terminal webhook (caller hung up, agent died). Close it so the board stops
   // showing it permanently "on call". Returns the ids that were expired.
-  async expireStale(olderThanMs: number): Promise<string[]> {
+  async expireStale(olderThanMs: number, channel: CallChannel = "voice"): Promise<string[]> {
     const { rows } = await this.pool.query(
       `UPDATE call_attempts SET status='NO_ANSWER', ended_at=now()
-       WHERE status = ANY($1)
+       WHERE status = ANY($1) AND channel = $3
          AND created_at < now() - ($2::numeric * interval '1 millisecond')
        RETURNING id`,
-      [["DIALING", "IN_PROGRESS"], olderThanMs],
+      [["DIALING", "IN_PROGRESS"], olderThanMs, channel],
     );
     return rows.map((r) => r.id);
+  }
+
+  // new: WA drivers still waiting on a load when someone else locks it — we tell
+  // them the load is filled. Query BEFORE supersedePending flips their status.
+  async listLivePeersByLoad(loadId: string, exceptOwnerId: string): Promise<CallAttempt[]> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM call_attempts WHERE load_id=$1 AND owner_id<>$2 AND status = ANY($3)`,
+      [loadId, exceptOwnerId, LIVE_STATUSES],
+    );
+    return rows.map(rowToCall);
   }
 }

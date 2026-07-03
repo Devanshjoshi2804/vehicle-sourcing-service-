@@ -6,7 +6,11 @@ import { startCallWatchdog } from "./calls/watchdog.js";
 const cfg = loadConfig();
 const pool = getPool(cfg.databaseUrl);
 const app = buildServer({ pool, config: cfg });
-startCallWatchdog(pool, { staleMinutes: cfg.callStaleMinutes, log: (m) => app.log.info(m) });
+startCallWatchdog(pool, {
+  staleMinutes: cfg.callStaleMinutes,
+  waStaleMinutes: cfg.waReplyTtlMin,
+  log: (m) => app.log.info(m),
+});
 app.listen({ port: cfg.port, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);
   process.exit(1);

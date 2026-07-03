@@ -6,15 +6,22 @@ import { CallsRepo } from "./calls.repo.js";
 // "on air" forever on the board. Returns a stop() to clear the timer.
 export function startCallWatchdog(
   pool: pg.Pool,
-  opts: { staleMinutes: number; intervalMs?: number; log?: (msg: string) => void },
+  opts: {
+    staleMinutes: number;
+    waStaleMinutes: number;
+    intervalMs?: number;
+    log?: (msg: string) => void;
+  },
 ): () => void {
   const callsRepo = new CallsRepo(pool);
   const staleMs = opts.staleMinutes * 60_000;
   const intervalMs = opts.intervalMs ?? 60_000;
   const tick = async () => {
     try {
-      const expired = await callsRepo.expireStale(staleMs);
-      if (expired.length) opts.log?.(`watchdog: closed ${expired.length} stale call(s)`);
+      const expired = await callsRepo.expireStale(staleMs, "voice");
+      const expiredWa = await callsRepo.expireStale(opts.waStaleMinutes * 60_000, "wa");
+      const n = expired.length + expiredWa.length;
+      if (n) opts.log?.(`watchdog: closed ${n} stale attempt(s)`);
     } catch (e) {
       opts.log?.(`watchdog error: ${e instanceof Error ? e.message : e}`);
     }

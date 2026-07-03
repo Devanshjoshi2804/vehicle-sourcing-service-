@@ -74,4 +74,20 @@ describe("CallsRepo", () => {
     expect(after?.status).toBe("NO_ANSWER");
     expect(after?.endedAt).toBeTruthy();
   });
+
+  it("wa attempts carry channel and expire on their own TTL", async () => {
+    const { pool } = await withTestDb();
+    const repo = new CallsRepo(pool);
+    const owners = new OwnersRepo(pool);
+    const loads = new LoadsRepo(pool);
+    const o = await owners.createOwner({ name: "W", phone: "+919111111188", vehicleTypes: ["16ft"], lanes: [] });
+    const l = await loads.createLoad({ fromLocation: "A", toLocation: "B", vehicleType: "16ft", pickupDate: "2026-07-05", fixedPriceInr: 1, createdBy: "t" });
+    const a = await repo.create({ loadId: l.id, ownerId: o.id, phone: o.phone, flow: "offer", channel: "wa" });
+    expect(a.channel).toBe("wa");
+    await repo.setStatus(a.id, "IN_PROGRESS");
+    await pool.query(`UPDATE call_attempts SET created_at = now() - interval '31 minutes' WHERE id=$1`, [a.id]);
+    expect(await repo.expireStale(60 * 60_000, "wa")).toEqual([]);       // 60min TTL: not stale yet
+    expect(await repo.expireStale(30 * 60_000, "voice")).toEqual([]);    // wrong channel: untouched
+    expect(await repo.expireStale(30 * 60_000, "wa")).toEqual([a.id]);   // 30min TTL: expired
+  });
 });
