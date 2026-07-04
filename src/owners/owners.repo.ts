@@ -43,14 +43,16 @@ export class OwnersRepo {
     const { rows } = await this.pool.query(
       `UPDATE owners SET
          name = COALESCE($2, name),
-         vehicle_types = COALESCE($3, vehicle_types),
-         lanes = COALESCE($4::jsonb, lanes),
-         active = COALESCE($5, active),
-         channel = COALESCE($6, channel)
+         phone = COALESCE($3, phone),
+         vehicle_types = COALESCE($4, vehicle_types),
+         lanes = COALESCE($5::jsonb, lanes),
+         active = COALESCE($6, active),
+         channel = COALESCE($7, channel)
        WHERE id = $1 RETURNING *`,
       [
         id,
         patch.name ?? null,
+        patch.phone ?? null,
         patch.vehicleTypes ?? null,
         patch.lanes ? JSON.stringify(patch.lanes) : null,
         patch.active ?? null,
@@ -68,5 +70,17 @@ export class OwnersRepo {
       [digits],
     );
     return rows[0] ? rowToOwner(rows[0]) : null;
+  }
+
+  // Hard delete. Drivers with call/quote history are protected by FK constraints —
+  // callers should deactivate those instead ("referenced" result).
+  async deleteOwner(id: string): Promise<"deleted" | "referenced" | "missing"> {
+    try {
+      const { rowCount } = await this.pool.query(`DELETE FROM owners WHERE id=$1`, [id]);
+      return (rowCount ?? 0) > 0 ? "deleted" : "missing";
+    } catch (e: any) {
+      if (e?.code === "23503") return "referenced"; // pg foreign_key_violation
+      throw e;
+    }
   }
 }

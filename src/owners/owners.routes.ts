@@ -21,4 +21,14 @@ export function registerOwnerRoutes(app: FastifyInstance, repo: OwnersRepo, preH
     if (!updated) return reply.code(404).send({ error: "not found" });
     return updated;
   });
+
+  // Hard delete only works for drivers with no call/quote history (FK-protected);
+  // 409 tells the console to deactivate instead so history stays intact.
+  app.delete<{ Params: { id: string } }>("/owners/:id", { preHandler }, async (req, reply) => {
+    const result = await repo.deleteOwner(req.params.id);
+    if (result === "missing") return reply.code(404).send({ error: "not found" });
+    if (result === "referenced")
+      return reply.code(409).send({ error: "driver has call history — deactivate instead" });
+    return reply.code(204).send();
+  });
 }

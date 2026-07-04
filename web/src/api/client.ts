@@ -149,6 +149,8 @@ export const api = {
   createOwner: (i: OwnerInput) => req<Owner>("POST", "/owners", i),
   updateOwner: (id: string, patch: Partial<OwnerInput> & { active?: boolean }) =>
     req<Owner>("PATCH", `/owners/${id}`, patch),
+  // 204 on success; 409 when the driver has call history (deactivate instead)
+  deleteOwner: (id: string) => req<void>("DELETE", `/owners/${id}`),
   // loads
   listLoads: () => req<Load[]>("GET", "/loads"),
   createLoad: (i: LoadInput) => req<Load>("POST", "/loads", i),

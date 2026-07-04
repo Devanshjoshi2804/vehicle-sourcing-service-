@@ -69,3 +69,22 @@ describe("owners routes", () => {
     expect(await repo.findByPhoneDigits("910000000000")).toBeNull();
   });
 });
+
+it("edits phone, deletes a fresh owner, refuses to delete one with history", async () => {
+  const { pool } = await withTestDb();
+  const repo = new OwnersRepo(pool);
+  const o = await repo.createOwner({ name: "Del", phone: "+919111100001", vehicleTypes: ["16ft"], lanes: [] });
+  // phone edit
+  const upd = await repo.updateOwner(o.id, { phone: "+919111100002" } as any);
+  expect(upd!.phone).toBe("+919111100002");
+  // clean delete
+  expect(await repo.deleteOwner(o.id)).toBe("deleted");
+  expect(await repo.deleteOwner(o.id)).toBe("missing");
+  // referenced delete
+  const { LoadsRepo } = await import("../src/loads/loads.repo.js");
+  const { CallsRepo } = await import("../src/calls/calls.repo.js");
+  const o2 = await repo.createOwner({ name: "Hist", phone: "+919111100003", vehicleTypes: ["16ft"], lanes: [] });
+  const load = await new LoadsRepo(pool).createLoad({ fromLocation: "A", toLocation: "B", vehicleType: "16ft", pickupDate: "2026-07-05", fixedPriceInr: 1, createdBy: "t" });
+  await new CallsRepo(pool).create({ loadId: load.id, ownerId: o2.id, phone: o2.phone, flow: "offer" });
+  expect(await repo.deleteOwner(o2.id)).toBe("referenced");
+});

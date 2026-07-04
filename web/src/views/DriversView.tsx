@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Truck, Plus, MapPin, Circle, Route, Radio } from "lucide-react";
+import { Truck, Plus, MapPin, Circle, Route, Radio, Pencil, Trash2 } from "lucide-react";
 import { api, Owner, OwnerInput } from "../api/client";
 import { usePolling } from "../hooks/usePolling";
 import { phoneShort } from "../lib/format";
@@ -20,11 +20,25 @@ function parseLanes(s: string) {
 export function DriversView() {
   const { data: owners, refresh } = usePolling(() => api.listOwners(), 8000, []);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", phone: "+91", vehicles: "16ft", lanes: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [rowErr, setRowErr] = useState<string | null>(null);
 
-  async function add() {
+  function startEdit(o: Owner) {
+    setEditingId(o.id);
+    setForm({
+      name: o.name,
+      phone: o.phone,
+      vehicles: o.vehicleTypes.join(", "),
+      lanes: o.lanes.map((l) => `${l.from} > ${l.to}`).join(", "),
+    });
+    setOpen(true);
+    setErr(null);
+  }
+
+  async function save() {
     setBusy(true);
     setErr(null);
     try {
@@ -34,15 +48,34 @@ export function DriversView() {
         vehicleTypes: form.vehicles.split(",").map((v) => v.trim()).filter(Boolean),
         lanes: parseLanes(form.lanes),
       };
-      await api.createOwner(input);
+      if (editingId) await api.updateOwner(editingId, input);
+      else await api.createOwner(input);
       setForm({ name: "", phone: "+91", vehicles: "16ft", lanes: "" });
       setOpen(false);
+      setEditingId(null);
       refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "could not add driver");
+      setErr(e instanceof Error ? e.message : "could not save driver");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function remove(o: Owner) {
+    if (!window.confirm(`Delete ${o.name}? This cannot be undone.`)) return;
+    setRowErr(null);
+    try {
+      await api.deleteOwner(o.id);
+    } catch (e) {
+      // 409 = has call history — keep the record, switch the driver off instead
+      if (e instanceof Error && e.message.startsWith("409")) {
+        await api.updateOwner(o.id, { active: false });
+        setRowErr(`${o.name} has call history — deactivated instead of deleted.`);
+      } else {
+        setRowErr(e instanceof Error ? e.message : "could not delete driver");
+      }
+    }
+    refresh();
   }
 
   const stats = useMemo(() => {
@@ -66,7 +99,14 @@ export function DriversView() {
         <RosterStat icon={<Route size={16} />} label="Lanes covered" value={stats.lanes} tone="amber" />
         <RosterStat icon={<MapPin size={16} />} label="Vehicle types" value={stats.vehicles} tone="sky" />
         <div className="ml-auto flex items-end">
-          <Button variant="primary" onClick={() => setOpen((v) => !v)} className="!py-2.5">
+          <Button
+            variant="primary"
+            onClick={() => {
+              if (open) { setOpen(false); setEditingId(null); }
+              else { setEditingId(null); setForm({ name: "", phone: "+91", vehicles: "16ft", lanes: "" }); setOpen(true); }
+            }}
+            className="!py-2.5"
+          >
             <Plus size={14} /> Add truck
           </Button>
         </div>
@@ -81,29 +121,35 @@ export function DriversView() {
             <Field label="Lanes (from > to, …)" value={form.lanes} onChange={(e) => setForm({ ...form, lanes: e.target.value })} placeholder="Mumbai > Pune" />
           </div>
           <div className="mt-3 flex items-center gap-3">
-            <Button variant="primary" onClick={add} disabled={busy || !form.name || form.phone.length < 8}>
-              {busy ? "Saving…" : "Save driver"}
+            <Button variant="primary" onClick={save} disabled={busy || !form.name || form.phone.length < 8}>
+              {busy ? "Saving…" : editingId ? "Update driver" : "Save driver"}
             </Button>
             {err && <span className="font-mono text-[11px] text-rose">{err}</span>}
           </div>
         </Panel>
       )}
 
+      {rowErr && (
+        <div className="mb-3 rounded-xl border border-line bg-amberSoft/60 px-4 py-2 font-mono text-[11px] text-amber">
+          {rowErr}
+        </div>
+      )}
       <Panel>
         {!owners || owners.length === 0 ? (
           <Empty icon={<Truck size={28} />} title="No drivers yet" hint="Add your vehicle owners — their lanes and vehicle types drive the auto-matcher." />
         ) : (
           <div className="divide-y divide-line/70">
-            <div className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto_auto] gap-3 px-4 py-2.5 eyebrow">
+            <div className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto_auto_auto] gap-3 px-4 py-2.5 eyebrow">
               <span>Driver</span>
               <span>Phone</span>
               <span>Vehicles</span>
               <span>Lanes</span>
               <span>Channel</span>
               <span>Status</span>
+              <span className="text-right">Actions</span>
             </div>
             {owners.map((o) => (
-              <div key={o.id} className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-panel2/40">
+              <div key={o.id} className="grid grid-cols-[1.4fr_1fr_1fr_1.4fr_auto_auto_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-panel2/40">
                 <span className="truncate text-[13px] font-600 text-fg">{o.name}</span>
                 <span className="font-mono text-[12px] tnum text-muted">{phoneShort(o.phone)}</span>
                 <span className="flex flex-wrap gap-1">
@@ -132,12 +178,32 @@ export function DriversView() {
                   <option value="whatsapp">💬 WhatsApp</option>
                   <option value="both">📞💬 Both</option>
                 </select>
-                <span>
+                <button
+                  onClick={() => api.updateOwner(o.id, { active: !o.active }).then(refresh).catch(() => setRowErr("could not update status"))}
+                  title={o.active ? "Click to switch off" : "Click to activate"}
+                  className="cursor-pointer"
+                >
                   {o.active ? (
                     <Chip color="go" dot>Active</Chip>
                   ) : (
                     <Chip color="muted"><Circle size={9} /> Off</Chip>
                   )}
+                </button>
+                <span className="flex items-center justify-end gap-1">
+                  <button
+                    onClick={() => startEdit(o)}
+                    title="Edit driver"
+                    className="grid h-7 w-7 place-items-center rounded-lg text-muted transition hover:bg-panel2 hover:text-fg"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    onClick={() => remove(o)}
+                    title="Delete driver"
+                    className="grid h-7 w-7 place-items-center rounded-lg text-muted transition hover:bg-roseSoft hover:text-rose"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </span>
               </div>
             ))}
