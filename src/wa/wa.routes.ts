@@ -57,14 +57,17 @@ export function registerWaRoutes(
         const actionKey = m.kind === "reply" ? `r:${m.replyId}` : `t:${(m.text ?? "").trim().toLowerCase()}`;
         const last = (fresh?.ctx as any)?.lastInbound;
         if (last?.key === actionKey && Date.now() - Number(last.ts) < 45_000) return;
+        // Role comes from the CURRENT owner match, not the cached session role —
+        // deactivating (or deleting) a driver immediately makes their number a
+        // customer, and adding an owner immediately makes it a driver.
         await deps.sessions.upsert({
           phone: m.from,
-          role: fresh?.role ?? (owner ? "driver" : "customer"),
+          role: owner ? "driver" : "customer",
           state: fresh?.state ?? "IDLE",
           ctx: { lastInbound: { key: actionKey, ts: Date.now() } },
         });
 
-        if (owner || fresh?.role === "driver") await handleDriverMessage(deps.driver, m, fresh);
+        if (owner) await handleDriverMessage(deps.driver, m, fresh);
         else await handleCustomerMessage(deps.customer, m, fresh);
       } catch (e) {
         app.log.error({ err: e }, "[wa] inbound processing failed");

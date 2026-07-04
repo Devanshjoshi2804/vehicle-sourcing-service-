@@ -87,3 +87,22 @@ describe("double-delivery dedup", () => {
     expect(sent.length).toBe(n); // second delivery ignored
   });
 });
+
+describe("role follows owner active state", () => {
+  it("a deactivated driver's number routes to the customer flow", async () => {
+    const { pool } = await withTestDb();
+    const { client, sent } = fakeInterakt();
+    const app = buildServer({ pool, config, interakt: client, el: { originateCall: async () => ({ conversationId: "c" }) } as any });
+    const owner = (await app.inject({ method: "POST", url: "/owners", headers: auth,
+      payload: { name: "R2", phone: "+919111111132", vehicleTypes: ["16ft"], lanes: [] } })).json();
+    // first message routes as driver
+    await post(app, inbound("hello", "+919111111132"));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(sent.some((s) => /load matches your route/i.test(String(s.args[0])))).toBe(true);
+    // deactivate → same number is now a customer
+    await app.inject({ method: "PATCH", url: `/owners/${owner.id}`, headers: auth, payload: { active: false } });
+    await post(app, inbound("need a truck", "+919111111132"));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(sent.some((s) => /Tell me your load|route, vehicle and price|Pickup city/i.test(String(s.args[0])))).toBe(true);
+  });
+});
