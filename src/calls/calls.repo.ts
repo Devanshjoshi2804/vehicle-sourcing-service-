@@ -102,6 +102,18 @@ export class CallsRepo {
     return rows.map(rowToCall);
   }
 
+  // The driver's newest live WhatsApp offer — lets typed replies ("haan", "15000")
+  // act on the right attempt even when the tap/session context is gone.
+  async findLiveWaByPhone(digits: string): Promise<CallAttempt | null> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM call_attempts
+       WHERE regexp_replace(phone, '\\D', '', 'g') = $1 AND channel='wa' AND status = ANY($2)
+       ORDER BY created_at DESC LIMIT 1`,
+      [digits, LIVE_STATUSES],
+    );
+    return rows[0] ? rowToCall(rows[0]) : null;
+  }
+
   // First-accept-wins: once one driver locks the load, stop dialing everyone else
   // on it. Marks every other live call SUPERSEDED and returns how many.
   async supersedePending(loadId: string, exceptOwnerId: string): Promise<number> {

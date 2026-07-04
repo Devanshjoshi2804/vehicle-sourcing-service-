@@ -120,3 +120,33 @@ describe("customer flow", () => {
     expect(sent.filter((s) => s.kind === "list").length).toBe(2);  // list re-sent
   });
 });
+
+describe("typed confirmations", () => {
+  it('typed "haan" at CONFIRM posts the load', async () => {
+    const { pool } = await withTestDb();
+    const { deps, sessions, demand } = await setup(pool);
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "16ft mumbai pune 13000" }) as any, null);
+    const session = await sessions.get("919888888833");
+    expect(session!.state).toBe("CONFIRM");
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "haan" }) as any, session);
+    const demands = await demand.list();
+    expect(demands[0]).toMatchObject({ channel: "whatsapp", status: "SOURCING" });
+  });
+
+  it('typed "yes" at CONFIRM_BOOKING books', async () => {
+    const { pool } = await withTestDb();
+    const { deps, sessions, demand, loads } = await setup(pool);
+    const load = await loads.createLoad({ fromLocation: "Mumbai", toLocation: "Pune", vehicleType: "16ft", pickupDate: "2026-07-05", fixedPriceInr: 13000, createdBy: "t" });
+    const { demand: d } = await demand.upsertByConversation({
+      customerPhone: "+919888888833", fromText: "Mumbai", toText: "Pune", vehicleType: "16ft",
+      offeredPriceInr: 13000, pickupDate: "2026-07-05", elConversationId: "wa_typed1", channel: "whatsapp",
+    } as any);
+    await demand.attachLoad(d.id, load.id);
+    await demand.setStatus(d.id, "SOURCING");
+    await demand.lockDriver(load.id, (await new OwnersRepo(pool).listOwners())[0].id, 14000);
+    await demand.approveValue(d.id);
+    const session = { phone: "919888888833", role: "customer", state: "CONFIRM_BOOKING", ctx: { demandId: d.id }, lastOptions: [] };
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "haan book karo" }) as any, session as any);
+    expect((await demand.getById(d.id))!.status).toBe("BOOKED");
+  });
+});

@@ -7,6 +7,7 @@ import { DemandRepo } from "../demand/demand.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
 import { ParsedLoad } from "./llm-parse.js";
 import { inr } from "./wa-sender.js";
+import { parseIntent, parsePriceText } from "./intent.js";
 
 export type CustomerFlowDeps = {
   capture: CaptureDeps;
@@ -68,7 +69,15 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
 
   // ---- booking confirm (domino step 4) ----
   if (state === "CONFIRM_BOOKING") {
-    const idMatch = m.kind === "reply" && m.replyId ? /^(bok|dec):([0-9a-f-]{36})$/i.exec(m.replyId) : null;
+    let idMatch = m.kind === "reply" && m.replyId ? /^(bok|dec):([0-9a-f-]{36})$/i.exec(m.replyId) : null;
+    // typed "haan"/"yes" or "nahi"/"cancel" instead of tapping — same meaning
+    if (!idMatch && m.kind === "text") {
+      const demandId = String(session?.ctx?.demandId ?? "");
+      const intent = parseIntent(m.text ?? "");
+      if (/^[0-9a-f-]{36}$/i.test(demandId) && intent.kind !== "unknown" && intent.kind !== "price") {
+        idMatch = /^(bok|dec):([0-9a-f-]{36})$/i.exec(`${intent.kind === "yes" ? "bok" : "dec"}:${demandId}`);
+      }
+    }
     if (idMatch) {
       try {
         const [, verb, demandId] = idMatch;
@@ -96,9 +105,15 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
     return;
   }
 
-  // ---- confirm-summary buttons ----
-  if (state === "CONFIRM" && m.kind === "reply") {
-    if (m.replyId === "cfm:yes") {
+  // ---- confirm-summary buttons (typed "haan"/"nahi" count too) ----
+  let confirmReply = state === "CONFIRM" && m.kind === "reply" ? m.replyId : null;
+  if (state === "CONFIRM" && m.kind === "text") {
+    const intent = parseIntent(m.text ?? "");
+    if (intent.kind === "yes") confirmReply = "cfm:yes";
+    if (intent.kind === "no") confirmReply = "cfm:no";
+  }
+  if (state === "CONFIRM" && confirmReply) {
+    if (confirmReply === "cfm:yes") {
       const r = await captureDemand(deps.capture, {
         customerPhone: `+${m.from}`, fromText: draft.fromText!, toText: draft.toText!,
         vehicleType: draft.vehicleType, offeredPriceInr: draft.priceInr, pickupDate: draft.pickupDate,
@@ -110,13 +125,13 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
         : "✅ Load received! Our team will arrange a truck and message you here.");
       return;
     }
-    if (m.replyId === "cfm:edit") {
+    if (confirmReply === "cfm:edit") {
       // start over, keeping nothing typed wrong: clear draft, re-ask from the top
       await deps.sessions.upsert({ phone: m.from, role: "customer", state: "ASK_FROM", ctx: { draft: {} }, lastOptions: [] });
       await say("Okay, let's redo it. Pickup city?");
       return;
     }
-    if (m.replyId === "cfm:no") {
+    if (confirmReply === "cfm:no") {
       await deps.sessions.clear(m.from);
       await say("Cancelled. Message me the route + vehicle + price anytime to post a load.");
       return;
@@ -133,13 +148,20 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
     if (m.kind === "reply" && m.replyId === "date:tomorrow") { draft.pickupDate = plusDays(1); return prompt(deps, m.from, draft); }
     if (m.kind === "reply" && m.replyId === "date:type") { await say("Please type the date as YYYY-MM-DD (e.g. 2026-07-05)."); return; }
     if (m.kind === "text" && /^\d{4}-\d{2}-\d{2}$/.test(m.text ?? "")) { draft.pickupDate = m.text!; return prompt(deps, m.from, draft); }
+    if (m.kind === "text") {
+      // "aaj"/"today", "kal"/"tomorrow", "parso" — the words drivers actually type
+      const w = (m.text ?? "").toLowerCase();
+      if (/\b(aaj|today|abhi)\b/.test(w)) { draft.pickupDate = todayIso(); return prompt(deps, m.from, draft); }
+      if (/\b(kal|tomorrow|tmrw)\b/.test(w)) { draft.pickupDate = plusDays(1); return prompt(deps, m.from, draft); }
+      if (/\b(parso|parson)\b/.test(w)) { draft.pickupDate = plusDays(2); return prompt(deps, m.from, draft); }
+    }
     await say("Please pick a date, or type it as YYYY-MM-DD.");
     return;
   }
   if (state === "ASK_PRICE" && m.kind === "text") {
-    const n = Number((m.text ?? "").replace(/[^\d]/g, ""));
-    if (Number.isFinite(n) && n >= 100) { draft.priceInr = n; return prompt(deps, m.from, draft); }
-    await say("Please reply with just the amount, e.g. 13000");
+    const n = parsePriceText(m.text ?? "");
+    if (n) { draft.priceInr = n; return prompt(deps, m.from, draft); }
+    await say("Please reply with just the amount — e.g. 13000 or 13k");
     return;
   }
   if (state === "ASK_FROM" && m.kind === "text" && m.text) { draft.fromText = m.text; return prompt(deps, m.from, draft); }

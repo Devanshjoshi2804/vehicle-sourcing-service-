@@ -3,9 +3,10 @@ import { WaInbound } from "./inbound.js";
 import { WaSession, WaSessionsRepo } from "./wa-sessions.repo.js";
 import { InteraktClient } from "./interakt.client.js";
 import { recordAvailability, AvailabilityDeps } from "../quotes/availability.js";
-import { CallsRepo } from "../calls/calls.repo.js";
+import { CallsRepo, CallAttempt } from "../calls/calls.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
 import { inr } from "./wa-sender.js";
+import { parseIntent, parsePriceText } from "./intent.js";
 
 export type DriverFlowDeps = {
   availability: AvailabilityDeps;
@@ -16,73 +17,31 @@ export type DriverFlowDeps = {
   config: Config;
 };
 
-const parsePrice = (s: string): number | null => {
-  const n = Number((s || "").replace(/[^\d]/g, ""));
-  return Number.isFinite(n) && n >= 100 ? n : null; // <100 is never a freight price
-};
+const UUID = /^[0-9a-f-]{36}$/i;
 
 export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, session: WaSession | null): Promise<void> {
   const say = (t: string) => deps.interakt.sendText(m.from, t);
 
-  if (m.kind === "reply" && m.replyId) {
-    const [verb, attemptId, priceStr] = m.replyId.split(":");
+  // ---- the three actions, shared by button taps and typed answers ----
 
-    // attemptId is user-controlled (a tapped button id) — pg throws on a bad uuid
-    // cast, so validate the shape before it ever reaches a query.
-    if ((verb === "acc" || verb === "ctr" || verb === "no") && /^[0-9a-f-]{36}$/i.test(attemptId ?? "")) {
-      const attempt = await deps.callsRepo.getById(attemptId);
-      if (!attempt || attempt.phone.replace(/\D/g, "") !== m.from) {
-        // spoofed/cross-phone id, or the attempt is gone — don't act on someone else's offer
-        await say("Sorry, this offer is no longer active.");
-        return;
-      }
-
-      const cid = `wa_${attemptId}`;
-
-      if (verb === "acc") {
-        const price = Number(priceStr) || undefined;
-        // allowUpdate: a driver who countered first can still tap Accept — the
-        // stored quote upgrades to accepts_fixed and the lock runs.
-        const r = await recordAvailability(deps.availability, {
-          cid, available: "YES", acceptsFixed: true, lockPriceInr: price ?? null, allowUpdate: true,
-        });
-        await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
-        await deps.sessions.clear(m.from);
-        await say(
-          r.ok && r.locked
-            ? `🎉 The load is yours at ${inr(price ?? 0)}. ${deps.config.companyName} will confirm pickup details shortly.`
-            : `Sorry — this load was just filled by another driver. Next time! 🙏`,
-        );
-        return;
-      }
-
-      if (verb === "ctr") {
-        await deps.sessions.upsert({ phone: m.from, role: "driver", state: "AWAIT_PRICE", ctx: { attemptId } });
-        await say("What's your price for this trip? Reply with the amount (₹).");
-        return;
-      }
-
-      if (verb === "no") {
-        await recordAvailability(deps.availability, { cid, available: "NO" });
-        await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
-        await deps.sessions.clear(m.from);
-        await say(`No problem — we'll keep you posted on the next load. 🙏`);
-        return;
-      }
-    }
-    // ponytail: unrecognized verb or malformed attemptId falls through to the generic greeting below
+  async function accept(attemptId: string, price: number | null) {
+    // allowUpdate: a driver who countered first can still accept — the stored
+    // quote upgrades to accepts_fixed and the (idempotent) lock runs.
+    const r = await recordAvailability(deps.availability, {
+      cid: `wa_${attemptId}`, available: "YES", acceptsFixed: true, lockPriceInr: price, allowUpdate: true,
+    });
+    await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
+    await deps.sessions.clear(m.from);
+    await say(
+      r.ok && r.locked
+        ? `🎉 The load is yours${price ? ` at ${inr(price)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`
+        : `Sorry — this load was just filled by another driver. Next time! 🙏`,
+    );
   }
 
-  // free text while we're waiting on their counter amount
-  if (session?.state === "AWAIT_PRICE" && m.kind === "text") {
-    const attemptId = String(session.ctx.attemptId ?? "");
-    const price = parsePrice(m.text ?? "");
-    if (!price) {
-      await say("Please reply with just the amount, e.g. 14000");
-      return;
-    }
+  async function counter(attemptId: string, price: number) {
     const r = await recordAvailability(deps.availability, {
-      cid: `wa_${attemptId}`, available: "YES", acceptsFixed: false, quotedPriceInr: price,
+      cid: `wa_${attemptId}`, available: "YES", acceptsFixed: false, quotedPriceInr: price, allowUpdate: true,
     });
     await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
     await deps.sessions.clear(m.from);
@@ -91,9 +50,85 @@ export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, se
         ? `Got it — ${inr(price)} passed to our team. We'll get back to you shortly.`
         : "Sorry — something went wrong recording your price. Our team will call you.",
     );
+  }
+
+  async function decline(attemptId: string) {
+    await recordAvailability(deps.availability, { cid: `wa_${attemptId}`, available: "NO", allowUpdate: true });
+    await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
+    await deps.sessions.clear(m.from);
+    await say(`No problem — we'll keep you posted on the next load. 🙏`);
+  }
+
+  // The price this attempt was offered at: the session carries it for re-offers;
+  // otherwise the load's fixed freight.
+  async function offerPrice(attempt: CallAttempt): Promise<number | null> {
+    const fromSession =
+      session?.ctx?.attemptId === attempt.id ? Number(session?.ctx?.priceInr) : NaN;
+    if (Number.isFinite(fromSession) && fromSession > 0) return fromSession;
+    const load = await deps.loadsRepo.getLoad(attempt.loadId);
+    return load?.fixedPriceInr ?? null;
+  }
+
+  // ---- button taps ----
+  if (m.kind === "reply" && m.replyId) {
+    const [verb, attemptId, priceStr] = m.replyId.split(":");
+
+    // attemptId is user-controlled (a tapped button id) — pg throws on a bad uuid
+    // cast, so validate the shape before it ever reaches a query.
+    if ((verb === "acc" || verb === "ctr" || verb === "no") && UUID.test(attemptId ?? "")) {
+      const attempt = await deps.callsRepo.getById(attemptId);
+      if (!attempt || attempt.phone.replace(/\D/g, "") !== m.from) {
+        // spoofed/cross-phone id, or the attempt is gone — don't act on someone else's offer
+        await say("Sorry, this offer is no longer active.");
+        return;
+      }
+      if (verb === "acc") return accept(attemptId, Number(priceStr) || (await offerPrice(attempt)));
+      if (verb === "no") return decline(attemptId);
+      // ctr
+      await deps.sessions.upsert({ phone: m.from, role: "driver", state: "AWAIT_PRICE", ctx: { attemptId } });
+      await say("What's your price for this trip? Reply with the amount (₹).");
+      return;
+    }
+    // ponytail: unrecognized verb or malformed attemptId falls through to the typed-text handling below
+  }
+
+  const text = m.kind === "text" ? (m.text ?? "") : (m.replyTitle ?? "");
+
+  // ---- we asked for their counter amount ----
+  if (session?.state === "AWAIT_PRICE") {
+    const attemptId = String(session.ctx.attemptId ?? "");
+    const price = parsePriceText(text);
+    if (price && UUID.test(attemptId)) return counter(attemptId, price);
+    const intent = parseIntent(text);
+    if (intent.kind === "no" && UUID.test(attemptId)) return decline(attemptId); // "rehne do"
+    await say("Please reply with just the amount — e.g. 14000 or 14k");
     return;
   }
 
-  // a driver texting outside any active offer
+  // ---- typed answer while an offer is live: understand yes / no / a price ----
+  const live = await deps.callsRepo.findLiveWaByPhone(m.from);
+  if (live) {
+    const intent = parseIntent(text);
+    if (intent.kind === "yes") return accept(live.id, await offerPrice(live));
+    if (intent.kind === "no") return decline(live.id);
+    if (intent.kind === "price") return counter(live.id, intent.priceInr);
+    // didn't understand — re-show the offer with its buttons instead of a dead greeting
+    const load = await deps.loadsRepo.getLoad(live.loadId);
+    const price = (await offerPrice(live)) ?? load?.fixedPriceInr ?? 0;
+    const buttons = [
+      { id: `acc:${live.id}:${price}`, title: `Accept ${inr(price)}`.slice(0, 20) },
+      { id: `ctr:${live.id}`, title: "My price" },
+      { id: `no:${live.id}`, title: "Not available" },
+    ];
+    const opts = await deps.interakt.sendButtons(
+      m.from,
+      `${load ? `🚛 ${load.fromLocation} → ${load.toLocation} · ${load.vehicleType} · pickup ${load.pickupDate}\nFreight: ${inr(price)}\n\n` : ""}Reply with a button below — or just type "haan", "nahi", or your price (e.g. 14000).`,
+      buttons,
+    );
+    await deps.sessions.upsert({ phone: m.from, role: "driver", state: "OFFERED", ctx: { attemptId: live.id, priceInr: price }, lastOptions: opts });
+    return;
+  }
+
+  // ---- no live offer: a driver just saying hello ----
   await say(`Namaste! We'll message you here when a load matches your route. — ${deps.config.companyName}`);
 }

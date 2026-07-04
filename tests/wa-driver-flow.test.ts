@@ -95,3 +95,39 @@ describe("accept after counter", () => {
     expect((await new LoadsRepo(pool).getLoad(load.id))!.status).toBe("LOCKED");
   });
 });
+
+describe("typed answers on a live offer", () => {
+  it('"haan" accepts and locks', async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent, load, calls } = await setup(pool);
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "text", text: "haan chalega" }) as any, null);
+    const { LoadsRepo } = await import("../src/loads/loads.repo.js");
+    expect((await new LoadsRepo(pool).getLoad(load.id))!.status).toBe("LOCKED");
+    expect(sent.some((s) => s.kind === "text" && /yours/i.test(s.args[0]))).toBe(true);
+  });
+
+  it('"15 hazar" records a counter', async () => {
+    const { pool } = await withTestDb();
+    const { deps, quotes, load } = await setup(pool);
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "text", text: "15 hazar milega to karunga" }) as any, null);
+    const qs = await quotes.listByLoad(load.id);
+    expect(qs[0]).toMatchObject({ available: "YES", acceptsFixed: false, quotedPriceInr: 15000 });
+  });
+
+  it('"nahi" declines', async () => {
+    const { pool } = await withTestDb();
+    const { deps, quotes, load } = await setup(pool);
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "text", text: "nahi bhai busy hu" }) as any, null);
+    const qs = await quotes.listByLoad(load.id);
+    expect(qs[0].available).toBe("NO");
+  });
+
+  it("gibberish re-shows the offer buttons instead of the greeting", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent } = await setup(pool);
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "text", text: "kaunsa route hai bhai?" }) as any, null);
+    const btns = sent.filter((s) => s.kind === "buttons");
+    expect(btns).toHaveLength(1);
+    expect(btns[0].args[1].map((b: any) => b.id.split(":")[0])).toEqual(["acc", "ctr", "no"]);
+  });
+});
