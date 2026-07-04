@@ -38,8 +38,8 @@ async function prompt(deps: CustomerFlowDeps, phone: string, draft: Draft): Prom
   const field = nextField(draft);
   if (field === null) {
     const body =
-      `📋 Load summary\n${draft.fromText} → ${draft.toText} · ${draft.vehicleType}\n` +
-      `Pickup ${draft.pickupDate} · ${inr(draft.priceInr!)}\n\nPost this load?`;
+      `📋 *Load summary*\n*${draft.fromText} → ${draft.toText}* · ${draft.vehicleType}\n` +
+      `Pickup ${draft.pickupDate} · *${inr(draft.priceInr!)}*\n\nPost this load?`;
     const opts = await deps.interakt.sendButtons(phone, body, [
       { id: "cfm:yes", title: "✅ Confirm" }, { id: "cfm:edit", title: "✏️ Edit" }, { id: "cfm:no", title: "❌ Cancel" },
     ]);
@@ -49,14 +49,26 @@ async function prompt(deps: CustomerFlowDeps, phone: string, draft: Draft): Prom
   const state = { fromText: "ASK_FROM", toText: "ASK_TO", vehicleType: "ASK_VEHICLE", pickupDate: "ASK_DATE", priceInr: "ASK_PRICE" }[field];
   let opts: { id: string; title: string }[] = [];
   if (field === "vehicleType") {
-    opts = await deps.interakt.sendList(phone, "Which vehicle do you need?", "Choose vehicle",
-      VEHICLES.map((v) => ({ id: `veh:${v}`, title: v })));
+    try {
+      opts = await deps.interakt.sendList(phone, "🚚 *Which vehicle do you need?*", "Choose vehicle",
+        VEHICLES.map((v) => ({ id: `veh:${v}`, title: v })));
+    } catch {
+      // list send failed (provider quirk) — NEVER leave the customer hanging:
+      // fall back to a numbered text menu; typed names/numbers resolve below.
+      await deps.interakt.sendText(phone,
+        `🚚 *Which vehicle do you need?* Reply with a number or name:\n${VEHICLES.map((v, i) => `${i + 1}. ${v}`).join("\n")}`);
+      opts = VEHICLES.map((v) => ({ id: `veh:${v}`, title: v }));
+    }
   } else if (field === "pickupDate") {
-    opts = await deps.interakt.sendButtons(phone, "When is the pickup?", [
+    opts = await deps.interakt.sendButtons(phone, "📅 *When is the pickup?*", [
       { id: "date:today", title: "Today" }, { id: "date:tomorrow", title: "Tomorrow" }, { id: "date:type", title: "Type a date" },
     ]);
   } else {
-    const q = { fromText: "Pickup city?", toText: "Drop city?", priceInr: "Your price for this trip? (₹)" }[field];
+    const q = {
+      fromText: "📍 *Pickup city?* (e.g. Mumbai or Andheri)",
+      toText: "🏁 *Drop city?*",
+      priceInr: "💰 *Your price for this trip?* (₹ — e.g. 13000 or 13k)",
+    }[field];
     await deps.interakt.sendText(phone, q!);
   }
   await deps.sessions.upsert({ phone, role: "customer", state, ctx: { draft }, lastOptions: opts });
@@ -66,6 +78,22 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
   const say = (t: string) => deps.interakt.sendText(m.from, t);
   const draft: Draft = { ...((session?.ctx?.draft as Draft) ?? {}) };
   const state = session?.state ?? "IDLE";
+
+  // Customers dump full sentences mid-flow ("16ft mumbai to pune 17000 tomorrow").
+  // Parse anything sentence-like and MERGE what it yields into the draft — never
+  // discard fields already collected.
+  async function mergeParse(text: string): Promise<boolean> {
+    if (text.trim().split(/\s+/).length < 3) return false;
+    const p = await deps.parseLoad(text, todayIso());
+    const fields = [p.fromText, p.toText, p.vehicleType, p.priceInr, p.pickupDate].filter((x) => x != null).length;
+    if (fields < 2) return false;
+    if (p.fromText) draft.fromText = p.fromText;
+    if (p.toText) draft.toText = p.toText;
+    if (p.vehicleType) draft.vehicleType = p.vehicleType;
+    if (p.priceInr) draft.priceInr = p.priceInr;
+    if (p.pickupDate) draft.pickupDate = p.pickupDate;
+    return true;
+  }
 
   // ---- booking confirm (domino step 4) ----
   if (state === "CONFIRM_BOOKING") {
@@ -155,20 +183,40 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
       if (/\b(kal|tomorrow|tmrw)\b/.test(w)) { draft.pickupDate = plusDays(1); return prompt(deps, m.from, draft); }
       if (/\b(parso|parson)\b/.test(w)) { draft.pickupDate = plusDays(2); return prompt(deps, m.from, draft); }
     }
+    if (m.kind === "text" && (await mergeParse(m.text ?? ""))) return prompt(deps, m.from, draft);
     await say("Please pick a date, or type it as YYYY-MM-DD.");
     return;
   }
   if (state === "ASK_PRICE" && m.kind === "text") {
     const n = parsePriceText(m.text ?? "");
     if (n) { draft.priceInr = n; return prompt(deps, m.from, draft); }
+    if (await mergeParse(m.text ?? "")) return prompt(deps, m.from, draft);
     await say("Please reply with just the amount — e.g. 13000 or 13k");
     return;
   }
-  if (state === "ASK_FROM" && m.kind === "text" && m.text) { draft.fromText = m.text; return prompt(deps, m.from, draft); }
-  if (state === "ASK_TO" && m.kind === "text" && m.text) { draft.toText = m.text; return prompt(deps, m.from, draft); }
+  if (state === "ASK_FROM" && m.kind === "text" && m.text) {
+    if (await mergeParse(m.text)) return prompt(deps, m.from, draft);
+    draft.fromText = m.text;
+    return prompt(deps, m.from, draft);
+  }
+  if (state === "ASK_TO" && m.kind === "text" && m.text) {
+    if (await mergeParse(m.text)) return prompt(deps, m.from, draft);
+    draft.toText = m.text;
+    return prompt(deps, m.from, draft);
+  }
 
   // ---- unrecognized reply mid-flow: re-prompt with the draft as-is, don't lose it ----
   if (state === "ASK_VEHICLE" && m.kind === "text") {
+    const t = (m.text ?? "").trim().toLowerCase();
+    const byNumber = /^[1-9]$/.test(t) ? VEHICLES[Number(t) - 1] : undefined;
+    // name-match only for short deliberate answers ("16ft", "tata ace") — a longer
+    // sentence ("bigger than 14ft chahiye") goes to the parser, not substring luck
+    const byName = t.split(/\s+/).length <= 2 ? VEHICLES.find((v) => t.includes(v.toLowerCase())) : undefined;
+    if (byNumber || byName) {
+      draft.vehicleType = byNumber ?? byName;
+      return prompt(deps, m.from, draft);
+    }
+    if (await mergeParse(m.text ?? "")) return prompt(deps, m.from, draft);
     await say("Please pick a vehicle from the list 👇");
     return prompt(deps, m.from, draft);
   }

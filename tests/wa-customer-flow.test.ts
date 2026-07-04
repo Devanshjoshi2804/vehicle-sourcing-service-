@@ -112,9 +112,11 @@ describe("customer flow", () => {
     let session = await sessions.get("919888888833");
     expect(session!.state).toBe("ASK_VEHICLE");
     // customer types instead of tapping the list
-    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "something bigger than 14ft" }) as any, session);
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "kuch bada wala chahiye bhai" }) as any, session);
     session = await sessions.get("919888888833");
-    expect(parseCalls).toBe(1);                                    // parseLoad must not re-run mid-flow
+    // mid-flow sentences are parse-MERGED now; an unparseable one must still
+    // keep the draft and re-prompt (parseCalls: 1 intake + 1 merge attempt)
+    expect(parseCalls).toBe(2);
     expect(session!.state).toBe("ASK_VEHICLE");                    // still asking vehicle
     expect((session!.ctx.draft as any).fromText).toBe("Mumbai");   // draft intact
     expect(sent.filter((s) => s.kind === "list").length).toBe(2);  // list re-sent
@@ -148,5 +150,48 @@ describe("typed confirmations", () => {
     const session = { phone: "919888888833", role: "customer", state: "CONFIRM_BOOKING", ctx: { demandId: d.id }, lastOptions: [] };
     await handleCustomerMessage(deps as any, msg({ kind: "text", text: "haan book karo" }) as any, session as any);
     expect((await demand.getById(d.id))!.status).toBe("BOOKED");
+  });
+});
+
+describe("mid-flow sentence merge + list fallback", () => {
+  it("a full sentence at ASK_VEHICLE fills the draft and reaches the summary", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sessions } = await setup(pool);
+    (deps as any).parseLoad = async (t: string) =>
+      t.includes("17000")
+        ? { fromText: "Mumbai", toText: "Pune", vehicleType: "16ft", priceInr: 17000, pickupDate: "2026-07-05" }
+        : { fromText: "Mumbai", toText: "Pune", vehicleType: null, priceInr: null, pickupDate: null };
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "mumbai to pune bhejna hai" }) as any, null);
+    let session = await sessions.get("919888888833");
+    expect(session!.state).toBe("ASK_VEHICLE");
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "16ft mumbai to Pune 17000 tomorrow" }) as any, session);
+    session = await sessions.get("919888888833");
+    expect(session!.state).toBe("CONFIRM");
+    expect(session!.ctx.draft as any).toMatchObject({ vehicleType: "16ft", priceInr: 17000 });
+  });
+
+  it("typed vehicle number/name works at ASK_VEHICLE", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sessions } = await setup(pool);
+    (deps as any).parseLoad = async () => ({ fromText: "Mumbai", toText: "Pune", vehicleType: null, priceInr: 13000, pickupDate: "2026-07-05" });
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "mumbai pune 13000" }) as any, null);
+    let session = await sessions.get("919888888833");
+    expect(session!.state).toBe("ASK_VEHICLE");
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "3" }) as any, session); // 3 = 16ft
+    session = await sessions.get("919888888833");
+    expect(session!.state).toBe("CONFIRM");
+    expect((session!.ctx.draft as any).vehicleType).toBe("16ft");
+  });
+
+  it("falls back to a numbered text menu when the list send fails", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent, sessions } = await setup(pool);
+    (deps as any).parseLoad = async () => ({ fromText: "Mumbai", toText: "Pune", vehicleType: null, priceInr: 13000, pickupDate: "2026-07-05" });
+    (deps.interakt as any).sendList = async () => { throw new Error("title is a required field"); };
+    await handleCustomerMessage(deps as any, msg({ kind: "text", text: "mumbai pune 13000" }) as any, null);
+    const session = await sessions.get("919888888833");
+    expect(session!.state).toBe("ASK_VEHICLE"); // customer not left hanging
+    expect(sent.some((s) => s.kind === "text" && /1\. Tata Ace/.test(s.args[0]))).toBe(true);
+    expect(session!.lastOptions.length).toBe(7); // typed names still resolve
   });
 });

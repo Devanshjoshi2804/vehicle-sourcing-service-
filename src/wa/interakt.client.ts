@@ -59,7 +59,8 @@ export function buildInteraktClient(config: Config, fetchImpl: typeof fetch = fe
       const message: Record<string, unknown> = {
         type: "list",
         body: { text: body },
-        action: { button: buttonLabel.slice(0, 20), sections: [{ rows: trimmedRows }] },
+        // Interakt rejects lists whose section has no title ("title is a required field")
+        action: { button: buttonLabel.slice(0, 20), sections: [{ title: buttonLabel.slice(0, 24), rows: trimmedRows }] },
       };
       if (header) message.header = { type: "text", text: header.slice(0, 60) };
       await post(to, { type: "InteractiveList", data: { message } });
