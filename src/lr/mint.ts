@@ -28,38 +28,43 @@ export type MintDeps = {
 // no demand row) still mint, just with ownerId left null and no notify. Never
 // throws: an owner lookup miss or a WA send failure must not break booking.
 export async function mintLr(deps: MintDeps, loadId: string): Promise<Lr | null> {
-  const existing = await deps.lrsRepo.getByLoad(loadId);
-  if (existing) return existing;
-
-  const load = await deps.loadsRepo.getLoad(loadId);
-  if (!load) return null;
-
-  const demand = await deps.demandRepo.findByLoadId(loadId);
-  const ownerId = demand?.winningOwnerId ?? null;
-
-  let lr: Lr;
   try {
-    lr = await deps.lrsRepo.create({ lrNumber: genLrNumber(), loadId, ownerId });
-  } catch (e: any) {
-    if (e?.code !== "23505") throw e; // not a unique-violation retry — a real failure
-    lr = await deps.lrsRepo.create({ lrNumber: genLrNumber(), loadId, ownerId }); // one retry on collision
-  }
+    const existing = await deps.lrsRepo.getByLoad(loadId);
+    if (existing) return existing;
 
-  if (deps.waSender && ownerId) {
+    const load = await deps.loadsRepo.getLoad(loadId);
+    if (!load) return null;
+
+    const demand = await deps.demandRepo.findByLoadId(loadId);
+    const ownerId = demand?.winningOwnerId ?? null;
+
+    let lr: Lr;
     try {
-      const owners = await deps.ownersRepo.getActiveOwners();
-      const owner = owners.find((o) => o.id === ownerId);
-      if (owner && owner.channel !== "voice") {
-        const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
-        await deps.waSender.sendText(
-          owner.phone,
-          `📄 Your LR: ${lr.lrNumber} — ${load.fromLocation} → ${load.toLocation} · ${inr(agreed)}. Send a photo of any LR or invoice here anytime.`,
-        );
-      }
-    } catch {
-      /* best-effort — a notify failure must never break booking */
+      lr = await deps.lrsRepo.create({ lrNumber: genLrNumber(), loadId, ownerId });
+    } catch (e: any) {
+      if (e?.code !== "23505") throw e; // not a unique-violation retry — a real failure
+      lr = await deps.lrsRepo.create({ lrNumber: genLrNumber(), loadId, ownerId }); // one retry on collision
     }
-  }
 
-  return lr;
+    if (deps.waSender && ownerId) {
+      try {
+        const owners = await deps.ownersRepo.getActiveOwners();
+        const owner = owners.find((o) => o.id === ownerId);
+        if (owner && owner.channel !== "voice") {
+          const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
+          await deps.waSender.sendText(
+            owner.phone,
+            `📄 Your LR: ${lr.lrNumber} — ${load.fromLocation} → ${load.toLocation} · ${inr(agreed)}. Send a photo of any LR or invoice here anytime.`,
+          );
+        }
+      } catch {
+        /* best-effort — a notify failure must never break booking */
+      }
+    }
+
+    return lr;
+  } catch {
+    // ponytail: mint is best-effort — a failure must never break the booking that triggered it
+    return null;
+  }
 }

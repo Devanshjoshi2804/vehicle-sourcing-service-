@@ -123,4 +123,16 @@ describe("LR minting on book", () => {
       expect(n.slice(4)).not.toMatch(/[OI]/);
     }
   });
+
+  it("mintLr never throws — a failing lrs insert returns null", async () => {
+    const { pool } = await withTestDb();
+    const { mintLr } = await import("../src/lr/mint.js");
+    const deps: any = {
+      lrsRepo: { getByLoad: async () => null, create: async () => { throw new Error("db down"); } },
+      loadsRepo: { getLoad: async () => ({ id: "x", fromLocation: "A", toLocation: "B", fixedPriceInr: 1 }) },
+      demandRepo: { findByLoadId: async () => null },
+      ownersRepo: { getActiveOwners: async () => [] },
+    };
+    await expect(mintLr(deps, "00000000-0000-0000-0000-000000000000")).resolves.toBeNull();
+  });
 });
