@@ -41,4 +41,16 @@ export class LoadsRepo {
   async setStatus(id: string, status: LoadStatus): Promise<void> {
     await this.pool.query(`UPDATE loads SET status=$2 WHERE id=$1`, [id, status]);
   }
+
+  // Invoice-without-LR-ref guess: the driver's own most recent BOOKED trip.
+  async latestBookedByOwner(ownerId: string): Promise<Load | null> {
+    const { rows } = await this.pool.query(
+      `SELECT loads.* FROM loads
+         JOIN demand_requests ON demand_requests.load_id = loads.id
+        WHERE loads.status = 'BOOKED' AND demand_requests.winning_owner_id = $1
+        ORDER BY loads.created_at DESC LIMIT 1`,
+      [ownerId],
+    );
+    return rows[0] ? rowToLoad(rows[0]) : null;
+  }
 }

@@ -87,6 +87,21 @@ export class DocsRepo {
     return rows[0] ? rowToDoc(rows[0]) : null;
   }
 
+  // Links a doc created as an unlinked "guess, pending confirmation" invoice
+  // (load_id/lr_id null) to the trip the driver just confirmed. Updates the
+  // SAME row by id — a plain upsert() would insert a second row instead, since
+  // this row's lr_id is only becoming non-null now.
+  async linkInvoice(
+    id: string,
+    p: { loadId: string; lrId: string | null; billedInr: number | null; varianceInr: number | null; dispute: DriverDoc["dispute"] },
+  ): Promise<DriverDoc | null> {
+    const { rows } = await this.pool.query(
+      `UPDATE driver_docs SET load_id=$2, lr_id=$3, billed_inr=$4, variance_inr=$5, dispute=$6 WHERE id=$1 RETURNING *`,
+      [id, p.loadId, p.lrId, p.billedInr, p.varianceInr, p.dispute],
+    );
+    return rows[0] ? rowToDoc(rows[0]) : null;
+  }
+
   // DISPUTED → RESOLVED only; anything else is a no-op (null).
   async resolveDispute(id: string): Promise<DriverDoc | null> {
     const { rows } = await this.pool.query(

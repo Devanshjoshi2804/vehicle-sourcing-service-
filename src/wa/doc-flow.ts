@@ -1,13 +1,15 @@
 import { Config } from "../config.js";
-import { VisionClient } from "./vision.js";
+import { VisionClient, VisionDoc } from "./vision.js";
 import { LrsRepo, Lr } from "../lr/lrs.repo.js";
-import { DocsRepo } from "../lr/docs.repo.js";
+import { DocsRepo, DriverDoc } from "../lr/docs.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
+import { Load } from "../loads/loads.schema.js";
 import { DemandRepo } from "../demand/demand.repo.js";
 import { InteraktClient } from "./interakt.client.js";
-import { WaSessionsRepo } from "./wa-sessions.repo.js";
+import { WaSessionsRepo, WaSession } from "./wa-sessions.repo.js";
 import { WaInbound } from "./inbound.js";
 import { Owner } from "../owners/owners.schema.js";
+import { inr } from "./wa-sender.js";
 
 export type DocFlowDeps = {
   vision: VisionClient;
@@ -171,6 +173,124 @@ async function resolveLr(
   }
 }
 
+// ---- invoice branch copy — VERBATIM per spec ----
+const NO_TRIP = "Which LR is this invoice for? Please type the LR number.";
+const NO_TOTAL = "Couldn't read the invoice amount — please type the amount (e.g. 16500 or 16.5k).";
+const invoiceMatch = (n: number) => `🧾 Invoice received: ${inr(n)} — matches the agreed freight.`;
+const invoiceDispute = (billed: number, agreed: number, diff: number) =>
+  `🧾 Invoice: ${inr(billed)} vs agreed ${inr(agreed)} — difference ${inr(diff)} flagged for review.`;
+const guessConfirmBody = (from: string, to: string, agreed: number) =>
+  `Is this invoice for ${from}→${to} · ${inr(agreed)}? `;
+
+type InvoiceCompare = {
+  billedInr: number | null;
+  varianceInr: number | null;
+  dispute: DriverDoc["dispute"];
+  reply: string;
+};
+
+// Exact match ⇒ NONE; no tolerance in v1 (spec §Invoice). variance_inr is signed
+// (billed - agreed); the reply always shows the absolute difference.
+function compareInvoice(billed: number | null, agreed: number): InvoiceCompare {
+  if (billed == null) return { billedInr: null, varianceInr: null, dispute: "NONE", reply: NO_TOTAL };
+  if (billed === agreed) return { billedInr: billed, varianceInr: 0, dispute: "NONE", reply: invoiceMatch(billed) };
+  const variance = billed - agreed;
+  return { billedInr: billed, varianceInr: variance, dispute: "DISPUTED", reply: invoiceDispute(billed, agreed, Math.abs(variance)) };
+}
+
+// Direct match (OCR'd lr_number resolved, or a guess just confirmed): compute
+// agreed price, score the invoice against it, upsert the doc, tell the driver.
+async function scoreAndUpsertInvoice(
+  deps: DocFlowDeps, owner: Owner, phone: string, mediaUrl: string, extracted: Record<string, unknown>,
+  load: Load, lrId: string | null, billed: number | null,
+): Promise<string> {
+  const demand = await deps.demandRepo.findByLoadId(load.id);
+  const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
+  const cmp = compareInvoice(billed, agreed);
+  await deps.docsRepo.upsert({
+    ownerId: owner.id, phone, loadId: load.id, lrId, kind: "invoice", mediaUrl, extracted,
+    billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute,
+  });
+  return cmp.reply;
+}
+
+async function resolveInvoice(deps: DocFlowDeps, m: WaInbound, owner: Owner, doc: VisionDoc): Promise<void> {
+  const mediaUrl = m.mediaUrl!;
+  const extracted = doc as unknown as Record<string, unknown>;
+
+  // 1. OCR'd lr_number → lr → load (direct match, no confirmation needed).
+  if (doc.lrNumber) {
+    const lr = await deps.lrsRepo.getByNumber(normalizeLrNumber(doc.lrNumber));
+    if (lr?.loadId) {
+      const load = await deps.loadsRepo.getLoad(lr.loadId);
+      if (load) {
+        const reply = await scoreAndUpsertInvoice(deps, owner, m.from, mediaUrl, extracted, load, lr.id, doc.billedTotalInr);
+        await deps.interakt.sendText(m.from, reply);
+        return;
+      }
+    }
+  }
+
+  // 2. No ref (or it didn't resolve) → guess the driver's most recent BOOKED load.
+  const guess = await deps.loadsRepo.latestBookedByOwner(owner.id);
+  if (!guess) {
+    await deps.docsRepo.upsert({
+      ownerId: owner.id, phone: m.from, kind: "invoice", mediaUrl, extracted, billedInr: doc.billedTotalInr,
+    });
+    await deps.interakt.sendText(m.from, NO_TRIP);
+    return;
+  }
+
+  const demand = await deps.demandRepo.findByLoadId(guess.id);
+  const agreed = demand?.lockedPriceInr ?? guess.fixedPriceInr;
+  const pending = await deps.docsRepo.upsert({
+    ownerId: owner.id, phone: m.from, kind: "invoice", mediaUrl, extracted, billedInr: doc.billedTotalInr,
+  });
+  const opts = await deps.interakt.sendButtons(m.from, guessConfirmBody(guess.fromLocation, guess.toLocation, agreed), [
+    { id: `invy:${pending.id}`, title: "Yes" },
+    { id: `invn:${pending.id}`, title: "No" },
+  ]);
+  await deps.sessions.upsert({
+    phone: m.from, role: "driver", state: "CONFIRM_INVOICE_TRIP",
+    ctx: { docId: pending.id, loadId: guess.id }, lastOptions: opts,
+  });
+}
+
+// Driver-flow calls this on any reply while a CONFIRM_INVOICE_TRIP session is
+// live; false means the reply isn't one of ours (caller falls through).
+export async function handleInvoiceConfirm(deps: DocFlowDeps, m: WaInbound, session: WaSession | null): Promise<boolean> {
+  if (!session || session.state !== "CONFIRM_INVOICE_TRIP" || m.kind !== "reply" || !m.replyId) return false;
+  const match = /^(invy|invn):(.+)$/.exec(m.replyId);
+  if (!match) return false;
+  const [, verb, docId] = match;
+  if (docId !== String(session.ctx?.docId ?? "")) return false; // stale button from an older invoice
+
+  if (verb === "invn") {
+    await deps.sessions.clear(m.from);
+    await deps.interakt.sendText(m.from, NO_TRIP);
+    return true;
+  }
+
+  const loadId = String(session.ctx?.loadId ?? "");
+  const load = loadId ? await deps.loadsRepo.getLoad(loadId) : null;
+  if (!load) {
+    await deps.sessions.clear(m.from);
+    await deps.interakt.sendText(m.from, NO_TRIP);
+    return true;
+  }
+  const [lr, demand, pendingDoc] = await Promise.all([
+    deps.lrsRepo.getByLoad(load.id),
+    deps.demandRepo.findByLoadId(load.id),
+    deps.docsRepo.getById(docId),
+  ]);
+  const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
+  const cmp = compareInvoice(pendingDoc?.billedInr ?? null, agreed);
+  await deps.docsRepo.linkInvoice(docId, { loadId: load.id, lrId: lr?.id ?? null, billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute });
+  await deps.sessions.clear(m.from);
+  await deps.interakt.sendText(m.from, cmp.reply);
+  return true;
+}
+
 export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: Owner): Promise<void> {
   const say = (t: string) => deps.interakt.sendText(m.from, t);
   const mediaUrl = m.mediaUrl;
@@ -205,12 +325,7 @@ export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: 
   }
 
   if (doc.docType === "invoice") {
-    // Task 7 replaces this stub with real invoice matching/dispute logic.
-    await deps.docsRepo.upsert({
-      ownerId: owner.id, phone: m.from, kind: "invoice", mediaUrl,
-      extracted: doc as unknown as Record<string, unknown>, billedInr: doc.billedTotalInr ?? null,
-    });
-    await say("Our team will check this invoice.");
+    await resolveInvoice(deps, m, owner, doc);
     return;
   }
 

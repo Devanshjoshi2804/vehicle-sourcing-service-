@@ -11,7 +11,9 @@ import { WaSessionsRepo } from "../src/wa/wa-sessions.repo.js";
 import { VisionClient, VisionDoc } from "../src/wa/vision.js";
 import { WaInbound } from "../src/wa/inbound.js";
 import { Owner } from "../src/owners/owners.schema.js";
-import { DocFlowDeps, handleDriverMedia, handleTypedLr, normalizeLrNumber, looksLikeLrNumber } from "../src/wa/doc-flow.js";
+import {
+  DocFlowDeps, handleDriverMedia, handleTypedLr, handleInvoiceConfirm, normalizeLrNumber, looksLikeLrNumber,
+} from "../src/wa/doc-flow.js";
 
 const testConfig = () =>
   loadConfig({
@@ -56,6 +58,21 @@ async function seed(pool: any) {
 
 function mediaMsg(phone: string, msgId: string, mediaUrl = "https://media.example/1.jpg"): WaInbound {
   return { from: digits(phone), msgId, kind: "media", mediaUrl, contactName: "R" };
+}
+
+function replyMsg(phone: string, msgId: string, replyId: string): WaInbound {
+  return { from: digits(phone), msgId, kind: "reply", replyId, replyTitle: replyId, contactName: "R" };
+}
+
+// The winner is locked onto `load` so LoadsRepo.latestBookedByOwner(owner.id) can find it
+// (it joins demand_requests.winning_owner_id, which the plain seed() load never sets).
+async function lockOwnerOnBookedLoad(s: Awaited<ReturnType<typeof seed>>, loadId: string, price: number) {
+  const { demand } = await s.demand.upsertByConversation({
+    customerPhone: "+919888811111", fromText: "Mumbai", toText: "Pune", elConversationId: `conv_${loadId}`,
+  });
+  await s.demand.setStatus(demand.id, "SOURCING");
+  await s.demand.attachLoad(demand.id, loadId);
+  await s.demand.lockDriver(loadId, s.owner.id, price);
 }
 
 function depsFor(
@@ -285,5 +302,131 @@ describe("doc-flow: LR branch", () => {
     expect(sent[0].args[0]).toMatch(/too big/);
     const doc = await latestDocFor(pool, digits(s.owner.phone));
     expect(doc.kind).toBe("unprocessed");
+  });
+});
+
+describe("LoadsRepo.latestBookedByOwner", () => {
+  it("finds the driver's most recent BOOKED load via demand_requests.winning_owner_id", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    expect(await s.loads.latestBookedByOwner(s.owner.id)).toBeNull(); // seed()'s load has no demand row
+
+    await lockOwnerOnBookedLoad(s, s.load.id, 14000);
+    const found = await s.loads.latestBookedByOwner(s.owner.id);
+    expect(found?.id).toBe(s.load.id);
+  });
+});
+
+describe("doc-flow: invoice branch", () => {
+  it("13. invoice with LR ref, billed == agreed → matches-freight reply, dispute NONE", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({
+      ok: true, doc: { docType: "invoice", lrNumber: "PIN-4K7KQ2", billedTotalInr: 14000 },
+    }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "i13"), s.owner);
+
+    expect(sent[0].args[0]).toMatch(/matches the agreed freight/);
+    const doc = await latestDocFor(pool, digits(s.owner.phone));
+    expect(doc.kind).toBe("invoice");
+    expect(doc.dispute).toBe("NONE");
+    expect(doc.load_id).toBe(s.load.id);
+  });
+
+  it("14. invoice with LR ref, billed vs agreed differ → DISPUTED + variance + diff reply", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({
+      ok: true, doc: { docType: "invoice", lrNumber: "PIN-4K7KQ2", billedTotalInr: 16500 },
+    }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "i14"), s.owner);
+
+    expect(sent[0].args[0]).toMatch(/difference ₹2,500/);
+    const doc = await latestDocFor(pool, digits(s.owner.phone));
+    expect(doc.dispute).toBe("DISPUTED");
+    expect(doc.variance_inr).toBe(2500);
+  });
+
+  it("15. invoice without LR ref, one BOOKED load → guess+confirm buttons, invy links + computes variance", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    await lockOwnerOnBookedLoad(s, s.load.id, 14000);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({
+      ok: true, doc: { docType: "invoice", lrNumber: null, billedTotalInr: 14000 },
+    }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "i15"), s.owner);
+
+    expect(sent[0].kind).toBe("buttons");
+    expect(sent[0].args[0]).toMatch(/Is this invoice for Mumbai→Pune · ₹14,000\?/);
+    const buttons: { id: string; title: string }[] = sent[0].args[1];
+    const yes = buttons.find((b) => b.id.startsWith("invy:"))!;
+    const no = buttons.find((b) => b.id.startsWith("invn:"))!;
+    expect(yes).toBeTruthy();
+    expect(no).toBeTruthy();
+    const docId = yes.id.split(":")[1];
+
+    const session = await s.sessions.get(digits(s.owner.phone));
+    expect(session?.state).toBe("CONFIRM_INVOICE_TRIP");
+    expect(session?.ctx.docId).toBe(docId);
+    expect(session?.ctx.loadId).toBe(s.load.id);
+
+    const handled = await handleInvoiceConfirm(d, replyMsg(s.owner.phone, "i15b", yes.id), session);
+    expect(handled).toBe(true);
+    const linked = await s.docs.getById(docId);
+    expect(linked?.loadId).toBe(s.load.id);
+    expect(linked?.varianceInr).toBe(0);
+    expect(linked?.dispute).toBe("NONE");
+    expect(sent[1].args[0]).toMatch(/matches the agreed freight/);
+  });
+
+  it("16. invn tap → doc stays unlinked, reply asks to type the LR number", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    await lockOwnerOnBookedLoad(s, s.load.id, 14000);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({
+      ok: true, doc: { docType: "invoice", lrNumber: null, billedTotalInr: 14000 },
+    }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "i16"), s.owner);
+    const buttons: { id: string; title: string }[] = sent[0].args[1];
+    const no = buttons.find((b) => b.id.startsWith("invn:"))!;
+    const docId = no.id.split(":")[1];
+    const session = await s.sessions.get(digits(s.owner.phone));
+
+    const handled = await handleInvoiceConfirm(d, replyMsg(s.owner.phone, "i16b", no.id), session);
+    expect(handled).toBe(true);
+    const doc = await s.docs.getById(docId);
+    expect(doc?.loadId).toBeNull();
+    expect(sent[1].args[0]).toMatch(/Which LR is this invoice for/);
+  });
+
+  it("17. invoice, no booked load at all → asks which LR, doc stored unlinked", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({
+      ok: true, doc: { docType: "invoice", lrNumber: null, billedTotalInr: 14000 },
+    }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "i17"), s.owner);
+
+    expect(sent[0].args[0]).toMatch(/Which LR is this invoice for/);
+    const doc = await latestDocFor(pool, digits(s.owner.phone));
+    expect(doc.kind).toBe("invoice");
+    expect(doc.load_id).toBeNull();
+  });
+
+  it("18. invoice with no readable total → asks driver to type the amount", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({
+      ok: true, doc: { docType: "invoice", lrNumber: "PIN-4K7KQ2", billedTotalInr: null },
+    }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "i18"), s.owner);
+
+    expect(sent[0].args[0]).toMatch(/type the amount/);
   });
 });
