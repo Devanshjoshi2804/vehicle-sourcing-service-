@@ -67,7 +67,7 @@ export function registerWaRoutes(
           ctx: { lastInbound: { key: actionKey, ts: Date.now() } },
         });
 
-        if (owner) await handleDriverMessage(deps.driver, m, fresh);
+        if (owner) await handleDriverMessage(deps.driver, m, fresh, owner);
         else await handleCustomerMessage(deps.customer, m, fresh);
       } catch (e) {
         app.log.error({ err: e }, "[wa] inbound processing failed");

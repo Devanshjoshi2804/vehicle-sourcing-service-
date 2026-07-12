@@ -7,6 +7,8 @@ import { CallsRepo, CallAttempt } from "../calls/calls.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
 import { inr } from "./wa-sender.js";
 import { parseIntent, parsePriceText } from "./intent.js";
+import { Owner } from "../owners/owners.schema.js";
+import { DocFlowDeps, handleDriverMedia, handleTypedLr, handleInvoiceConfirm, applyTypedInvoiceAmount } from "./doc-flow.js";
 
 export type DriverFlowDeps = {
   availability: AvailabilityDeps;
@@ -15,11 +17,14 @@ export type DriverFlowDeps = {
   callsRepo: CallsRepo;
   loadsRepo: LoadsRepo;
   config: Config;
+  docs?: DocFlowDeps;
 };
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
-export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, session: WaSession | null): Promise<void> {
+export async function handleDriverMessage(
+  deps: DriverFlowDeps, m: WaInbound, session: WaSession | null, owner?: Owner | null,
+): Promise<void> {
   const say = (t: string) => deps.interakt.sendText(m.from, t);
 
   // ---- the three actions, shared by button taps and typed answers ----
@@ -71,6 +76,10 @@ export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, se
 
   // ---- button taps ----
   if (m.kind === "reply" && m.replyId) {
+    // invy:/invn: (invoice trip confirm) — falls through (returns false) for
+    // any other button so the acc/ctr/no handling below still runs.
+    if (deps.docs && (await handleInvoiceConfirm(deps.docs, m, session))) return;
+
     const [verb, attemptId, priceStr] = m.replyId.split(":");
 
     // attemptId is user-controlled (a tapped button id) — pg throws on a bad uuid
@@ -94,6 +103,20 @@ export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, se
 
   const text = m.kind === "text" ? (m.text ?? "") : (m.replyTitle ?? "");
 
+  // ---- we asked for the invoice amount we couldn't read off the photo ----
+  if (session?.state === "AWAIT_INVOICE_AMOUNT" && deps.docs) {
+    const docId = String(session.ctx?.docId ?? "");
+    const amount = parsePriceText(text);
+    if (amount && docId) {
+      const reply = await applyTypedInvoiceAmount(deps.docs, docId, amount, m.from);
+      await deps.sessions.clear(m.from);
+      await say(reply);
+      return;
+    }
+    await say("Please reply with just the amount — e.g. 16500 or 16.5k");
+    return;
+  }
+
   // ---- we asked for their counter amount ----
   if (session?.state === "AWAIT_PRICE") {
     const attemptId = String(session.ctx.attemptId ?? "");
@@ -103,6 +126,11 @@ export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, se
     if (intent.kind === "no" && UUID.test(attemptId)) return decline(attemptId); // "rehne do"
     await say("Please reply with just the amount — e.g. 14000 or 14k");
     return;
+  }
+
+  // ---- a document photo/pdf: LR or invoice intake ----
+  if (m.kind === "media" && deps.docs && owner) {
+    return handleDriverMedia(deps.docs, m, owner);
   }
 
   // ---- typed answer while an offer is live: understand yes / no / a price ----
@@ -128,6 +156,9 @@ export async function handleDriverMessage(deps: DriverFlowDeps, m: WaInbound, se
     await deps.sessions.upsert({ phone: m.from, role: "driver", state: "OFFERED", ctx: { attemptId: live.id, priceInr: price }, lastOptions: opts });
     return;
   }
+
+  // ---- typed LR number, no live offer to catch it first ----
+  if (deps.docs && owner && (await handleTypedLr(deps.docs, text, owner, m.from))) return;
 
   // ---- no live offer: a driver just saying hello ----
   await say(`Namaste! We'll message you here when a load matches your route. — ${deps.config.companyName}`);

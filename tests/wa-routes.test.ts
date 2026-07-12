@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { withTestDb } from "./helpers/db.js";
 import { buildServer } from "../src/server.js";
 import { loadConfig } from "../src/config.js";
+import { VisionClient } from "../src/wa/vision.js";
 import { fakeInterakt } from "./helpers/wa.js";
 
 const config = loadConfig({
@@ -85,6 +86,47 @@ describe("double-delivery dedup", () => {
     await post(app, payload("dup_b")); // same tap, different message id (Interakt double delivery)
     await new Promise((r) => setTimeout(r, 120));
     expect(sent.length).toBe(n); // second delivery ignored
+  });
+});
+
+describe("driver document intake (media)", () => {
+  it("a signed media webhook from a driver phone runs the doc pipeline with the injected vision stub and stores a row", async () => {
+    const { pool } = await withTestDb();
+    const { client, sent } = fakeInterakt();
+    const stubVision: VisionClient = {
+      async extract() {
+        return {
+          ok: true,
+          doc: {
+            docType: "other", lrNumber: null, billedTotalInr: null, vehicleNo: null,
+            from: null, to: null, docDate: null, paidStampSeen: false, confidence: 0.9,
+          },
+        };
+      },
+    };
+    const app = buildServer({
+      pool, config, interakt: client, vision: stubVision,
+      el: { originateCall: async () => ({ conversationId: "c" }) } as any,
+    });
+    const phone = "+919111111199";
+    await app.inject({ method: "POST", url: "/owners", headers: auth,
+      payload: { name: "Driver", phone, vehicleTypes: ["16ft"], lanes: [] } });
+
+    const payload = {
+      type: "message_received",
+      data: {
+        customer: { channel_phone_number: phone, traits: { name: "Driver" } },
+        message: { id: "m_doc1", message_content_type: "Image", media_url: "https://ik.media/lr.jpg" },
+      },
+    };
+    const res = await post(app, payload);
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 100)); // async processing
+
+    expect(sent.some((s) => s.kind === "text" && /doesn't look like an LR or invoice/.test(s.args[0]))).toBe(true);
+    const { rows } = await pool.query(`SELECT * FROM driver_docs WHERE phone=$1`, [phone.replace(/\D/g, "")]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("other");
   });
 });
 

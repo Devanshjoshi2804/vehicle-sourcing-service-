@@ -51,6 +51,14 @@ describe("customer flow", () => {
     expect(sent.some((s) => s.kind === "text" && /truck/i.test(s.args[0]))).toBe(true);
   });
 
+  it("a photo/document from a customer gets the driver-only decline, not the load parser", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent } = await setup(pool);
+    await handleCustomerMessage(deps as any, msg({ kind: "media", mediaUrl: "https://media.example/x.jpg" }) as any, null);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].args[0]).toBe("Documents are for drivers — type your load instead 🙂");
+  });
+
   it("missing vehicle → asks with a list, fills, then confirms", async () => {
     const { pool } = await withTestDb();
     const { deps, sent, sessions } = await setup(pool);

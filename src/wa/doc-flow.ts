@@ -198,20 +198,34 @@ function compareInvoice(billed: number | null, agreed: number): InvoiceCompare {
   return { billedInr: billed, varianceInr: variance, dispute: "DISPUTED", reply: invoiceDispute(billed, agreed, Math.abs(variance)) };
 }
 
+// Sends the compare reply and, on NO_TOTAL specifically, parks the driver in
+// AWAIT_INVOICE_AMOUNT (ctx docId/loadId) so a typed number resumes the
+// compare instead of the message getting silently dropped.
+async function afterInvoiceReply(
+  deps: DocFlowDeps, phone: string, docId: string, loadId: string | null, cmp: InvoiceCompare,
+): Promise<void> {
+  if (cmp.reply === NO_TOTAL) {
+    await deps.sessions.upsert({ phone, role: "driver", state: "AWAIT_INVOICE_AMOUNT", ctx: { docId, loadId } });
+  } else {
+    await deps.sessions.clear(phone);
+  }
+  await deps.interakt.sendText(phone, cmp.reply);
+}
+
 // Direct match (OCR'd lr_number resolved, or a guess just confirmed): compute
 // agreed price, score the invoice against it, upsert the doc, tell the driver.
 async function scoreAndUpsertInvoice(
   deps: DocFlowDeps, owner: Owner, phone: string, mediaUrl: string, extracted: Record<string, unknown>,
   load: Load, lrId: string | null, billed: number | null,
-): Promise<string> {
+): Promise<void> {
   const demand = await deps.demandRepo.findByLoadId(load.id);
   const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
   const cmp = compareInvoice(billed, agreed);
-  await deps.docsRepo.upsert({
+  const doc = await deps.docsRepo.upsert({
     ownerId: owner.id, phone, loadId: load.id, lrId, kind: "invoice", mediaUrl, extracted,
     billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute,
   });
-  return cmp.reply;
+  await afterInvoiceReply(deps, phone, doc.id, load.id, cmp);
 }
 
 async function resolveInvoice(deps: DocFlowDeps, m: WaInbound, owner: Owner, doc: VisionDoc): Promise<void> {
@@ -224,8 +238,7 @@ async function resolveInvoice(deps: DocFlowDeps, m: WaInbound, owner: Owner, doc
     if (lr?.loadId) {
       const load = await deps.loadsRepo.getLoad(lr.loadId);
       if (load) {
-        const reply = await scoreAndUpsertInvoice(deps, owner, m.from, mediaUrl, extracted, load, lr.id, doc.billedTotalInr);
-        await deps.interakt.sendText(m.from, reply);
+        await scoreAndUpsertInvoice(deps, owner, m.from, mediaUrl, extracted, load, lr.id, doc.billedTotalInr);
         return;
       }
     }
@@ -286,9 +299,26 @@ export async function handleInvoiceConfirm(deps: DocFlowDeps, m: WaInbound, sess
   const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
   const cmp = compareInvoice(pendingDoc?.billedInr ?? null, agreed);
   await deps.docsRepo.linkInvoice(docId, { loadId: load.id, lrId: lr?.id ?? null, billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute });
-  await deps.sessions.clear(m.from);
-  await deps.interakt.sendText(m.from, cmp.reply);
+  await afterInvoiceReply(deps, m.from, docId, load.id, cmp);
   return true;
+}
+
+// Resumes an invoice compare after the driver TYPES the amount we couldn't
+// read off the photo (NO_TOTAL ask). docId's row already carries load_id (set
+// before the NO_TOTAL reply went out in both callers above) — reuse linkInvoice
+// so a same-lr collision merges the same way a normal confirm would.
+export async function applyTypedInvoiceAmount(
+  deps: DocFlowDeps, docId: string, amountInr: number, phone: string,
+): Promise<string> {
+  const doc = await deps.docsRepo.getById(docId);
+  if (!doc?.loadId) return NO_TRIP;
+  const load = await deps.loadsRepo.getLoad(doc.loadId);
+  if (!load) return NO_TRIP;
+  const demand = await deps.demandRepo.findByLoadId(load.id);
+  const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
+  const cmp = compareInvoice(amountInr, agreed);
+  await deps.docsRepo.linkInvoice(docId, { loadId: load.id, lrId: doc.lrId, billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute });
+  return cmp.reply;
 }
 
 export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: Owner): Promise<void> {

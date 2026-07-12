@@ -230,6 +230,12 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
     return prompt(deps, m.from, draft);
   }
 
+  // ---- documents are a driver-only feature ----
+  if (m.kind === "media") {
+    await say("Documents are for drivers — type your load instead 🙂");
+    return;
+  }
+
   // ---- fresh message: try the one-shot parse ----
   if (m.kind === "text" && m.text) {
     const p = await deps.parseLoad(m.text, todayIso());

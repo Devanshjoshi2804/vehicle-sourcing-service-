@@ -28,6 +28,7 @@ import { buildLoadParser } from "./wa/llm-parse.js";
 import { LrsRepo } from "./lr/lrs.repo.js";
 import { DocsRepo } from "./lr/docs.repo.js";
 import { MintDeps } from "./lr/mint.js";
+import { buildVisionClient, VisionClient } from "./wa/vision.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
@@ -35,6 +36,7 @@ export function buildServer(deps: {
   el?: ElevenLabsClient;
   geo?: GeoResolver;
   interakt?: InteraktClient;
+  vision?: VisionClient;
 }): FastifyInstance {
   const app = Fastify({ logger: true });
   // Interakt signs /wa/inbound with an HMAC of the RAW body; the JSON content-type
@@ -119,8 +121,10 @@ export function buildServer(deps: {
   const demandRepo = new DemandRepo(deps.pool);
   const geo = deps.geo ?? buildGeoResolver(deps.config);
   const lrsRepo = new LrsRepo(deps.pool);
-  const docsRepo = new DocsRepo(deps.pool); // consumed by the driver LR/invoice-upload flow (later task)
+  const docsRepo = new DocsRepo(deps.pool);
   const mint: MintDeps = { lrsRepo, loadsRepo, demandRepo, ownersRepo, waSender };
+  const vision =
+    deps.vision ?? (deps.config.geminiApiKey || deps.config.mistralApiKey ? buildVisionClient(deps.config) : undefined);
 
   registerOwnerRoutes(app, ownersRepo, preHandler);
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
@@ -142,11 +146,14 @@ export function buildServer(deps: {
   if (interakt && waSender) {
     const availability = { quotesRepo, callsRepo, loadsRepo, demandRepo, orchestrator };
     const capture = { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, geo };
+    const docs = vision
+      ? { vision, lrsRepo, docsRepo, loadsRepo, demandRepo, interakt, sessions: waSessions, config: deps.config }
+      : undefined;
     registerWaRoutes(app, {
       config: deps.config,
       sessions: waSessions,
       ownersRepo,
-      driver: { availability, interakt, sessions: waSessions, callsRepo, loadsRepo, config: deps.config },
+      driver: { availability, interakt, sessions: waSessions, callsRepo, loadsRepo, config: deps.config, docs },
       customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config, mint },
     });
   }
