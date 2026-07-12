@@ -14,7 +14,7 @@
 ## Data (migration 005)
 
 ```sql
-CREATE TABLE lrs (
+CREATE TABLE IF NOT EXISTS lrs (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   lr_number     text NOT NULL UNIQUE,             -- 'PIN-4K7KQ2' (system) or foreign number
   load_id       uuid REFERENCES loads(id),
@@ -26,7 +26,7 @@ CREATE TABLE lrs (
   note          text,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE driver_docs (
+CREATE TABLE IF NOT EXISTS driver_docs (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_id      uuid REFERENCES owners(id),
   phone         text NOT NULL,                     -- digits, sender
@@ -41,7 +41,7 @@ CREATE TABLE driver_docs (
   created_at    timestamptz NOT NULL DEFAULT now()
 );
 -- re-upload updates the same row rather than piling up duplicates
-CREATE UNIQUE INDEX driver_docs_owner_lr_kind ON driver_docs(owner_id, lr_id, kind) WHERE lr_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS driver_docs_owner_lr_kind ON driver_docs(owner_id, lr_id, kind) WHERE lr_id IS NOT NULL;
 ```
 
 ## LR minting
