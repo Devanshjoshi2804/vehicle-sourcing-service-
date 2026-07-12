@@ -76,6 +76,7 @@ Normalize the number (uppercase, strip spaces/dashes except the `PIN-` prefix, O
 | Foreign number | create load (`createdBy: driver_upload:<ownerId>`, DRAFT) + lr (`source driver_upload`, `needs_review`, mapped to driver) from OCR'd route/vehicle/date; rate-capped 5/driver/day | `New LR <n> registered — our team will verify.` |
 | Unreadable / doc_type=other | store as `other`/`unprocessed` | polite: not a freight doc / `Couldn't read this — please type the LR number, or our team will check.` |
 
+- Typed LR lookups never CREATE records: a typed foreign number replies `LR <n> not found — our team will check.` (creation is reserved for photographed documents).
 - Typed LR numbers also work: a text message matching `^(PIN-)?(?=.*\d)[A-Z0-9-]{4,20}$` (uppercased; MUST contain a digit so "HAAN"/"NAHI" never match) triggers the same lookup — checked only AFTER the live-offer intents (accept/decline/price), so negotiation always wins.
 - `paid_stamp_seen=true` on an UNPAID lr ⇒ note "claims paid" on the lr + doc kept for review; status reply still says UNPAID.
 - Duplicate uploads: one doc row per (owner, lr, kind) — re-upload updates it.
