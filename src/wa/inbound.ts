@@ -3,10 +3,11 @@ import { WaOption } from "./interakt.client.js";
 export type WaInbound = {
   from: string;
   msgId: string;
-  kind: "reply" | "text";
+  kind: "reply" | "text" | "media";
   replyId?: string;
   replyTitle?: string;
   text?: string;
+  mediaUrl?: string;
   contactName: string;
 };
 
@@ -53,6 +54,9 @@ export function parseInbound(payload: any, lastOptions: WaOption[]): WaInbound |
       }
     } catch { /* not a JSON reply */ }
   }
+
+  const mediaUrl: string | undefined = msg.media_url || undefined;
+  if (mediaUrl) return { ...base, kind: "media", mediaUrl };
 
   const needle = norm(raw);
   if (needle) {

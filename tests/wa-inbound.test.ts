@@ -34,4 +34,14 @@ describe("parseInbound", () => {
     const r = parseInbound(base("16ft mumbai to pune 13000"), [{ id: "x", title: "Confirm" }]);
     expect(r).toMatchObject({ kind: "text", text: "16ft mumbai to pune 13000" });
   });
+
+  it("classifies an image message as media", () => {
+    const r = parseInbound(base("", { media_url: "https://ik.media/x.jpg", message_content_type: "Image" }), []);
+    expect(r).toMatchObject({ kind: "media", mediaUrl: "https://ik.media/x.jpg" });
+  });
+
+  it("classifies a document/pdf message as media", () => {
+    const r = parseInbound(base("", { media_url: "https://ik.media/x.pdf", message_content_type: "Document" }), []);
+    expect(r).toMatchObject({ kind: "media", mediaUrl: "https://ik.media/x.pdf" });
+  });
 });
