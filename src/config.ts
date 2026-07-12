@@ -49,6 +49,14 @@ const schema = z.object({
   // LLM parse of free-text customer loads (optional — guided flow without it)
   GROQ_API_KEY: z.string().optional(),
   GROQ_MODEL: z.string().default("llama-3.3-70b-versatile"),
+  // Vision extraction of driver documents (LR/invoice photos). Optional — the
+  // doc pipeline stores docs UNPROCESSED without a key.
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-flash-latest"),
+  MISTRAL_API_KEY: z.string().optional(),
+  MISTRAL_MODEL: z.string().default("pixtral-12b-2409"),
+  LR_CREATE_DAILY_CAP: z.coerce.number().default(5),
+  DOC_MAX_BYTES: z.coerce.number().default(8_388_608),
 });
 
 export type Config = {
@@ -81,6 +89,12 @@ export type Config = {
   waReplyTtlMin: number;
   groqApiKey?: string;
   groqModel: string;
+  geminiApiKey?: string;
+  geminiModel: string;
+  mistralApiKey?: string;
+  mistralModel: string;
+  lrCreateDailyCap: number;
+  docMaxBytes: number;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -115,5 +129,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     waReplyTtlMin: p.WA_REPLY_TTL_MIN,
     groqApiKey: p.GROQ_API_KEY,
     groqModel: p.GROQ_MODEL,
+    geminiApiKey: p.GEMINI_API_KEY,
+    geminiModel: p.GEMINI_MODEL,
+    mistralApiKey: p.MISTRAL_API_KEY,
+    mistralModel: p.MISTRAL_MODEL,
+    lrCreateDailyCap: p.LR_CREATE_DAILY_CAP,
+    docMaxBytes: p.DOC_MAX_BYTES,
   };
 }

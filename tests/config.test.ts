@@ -54,4 +54,18 @@ describe("loadConfig", () => {
     } as NodeJS.ProcessEnv);
     expect(cfg.waEnabled).toBe(false);
   });
+
+  it("parses vision/doc config with defaults", () => {
+    const cfg = loadConfig({
+      DATABASE_URL: "postgres://x", API_KEY: "k", WEBHOOK_SECRET: "w",
+      PUBLIC_BASE_URL: "https://h", ELEVENLABS_API_KEY: "el",
+      ELEVENLABS_AGENT_SOURCING: "a", ELEVENLABS_SIP_PHONE_ID: "p",
+      GEMINI_API_KEY: "g",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.geminiApiKey).toBe("g");
+    expect(cfg.geminiModel).toBe("gemini-flash-latest");
+    expect(cfg.mistralModel).toBe("pixtral-12b-2409");
+    expect(cfg.lrCreateDailyCap).toBe(5);
+    expect(cfg.docMaxBytes).toBe(8388608);
+  });
 });
