@@ -8,6 +8,7 @@ import { LoadsRepo } from "../loads/loads.repo.js";
 import { ParsedLoad } from "./llm-parse.js";
 import { inr } from "./wa-sender.js";
 import { parseIntent, parsePriceText } from "./intent.js";
+import { mintLr, MintDeps } from "../lr/mint.js";
 
 export type CustomerFlowDeps = {
   capture: CaptureDeps;
@@ -17,6 +18,7 @@ export type CustomerFlowDeps = {
   loadsRepo: LoadsRepo;
   parseLoad: (text: string, today: string) => Promise<ParsedLoad>;
   config: Config;
+  mint?: MintDeps;
 };
 
 type Draft = { fromText?: string; toText?: string; vehicleType?: string; priceInr?: number; pickupDate?: string };
@@ -112,7 +114,10 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
         const d = await deps.demandRepo.getById(demandId);
         if (d && verb === "bok") {
           const booked = await deps.demandRepo.book(d.id);
-          if (booked && d.loadId) await deps.loadsRepo.setStatus(d.loadId, "BOOKED");
+          if (booked && d.loadId) {
+            await deps.loadsRepo.setStatus(d.loadId, "BOOKED");
+            if (deps.mint) await mintLr(deps.mint, d.loadId);
+          }
           await deps.sessions.clear(m.from);
           await say(booked ? "🎉 Booked! The driver will call you before pickup." : "This booking is no longer pending.");
           return;

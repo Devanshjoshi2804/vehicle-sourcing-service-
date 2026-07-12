@@ -25,6 +25,9 @@ import { WaSessionsRepo } from "./wa/wa-sessions.repo.js";
 import { buildWaSender } from "./wa/wa-sender.js";
 import { registerWaRoutes } from "./wa/wa.routes.js";
 import { buildLoadParser } from "./wa/llm-parse.js";
+import { LrsRepo } from "./lr/lrs.repo.js";
+import { DocsRepo } from "./lr/docs.repo.js";
+import { MintDeps } from "./lr/mint.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
@@ -115,12 +118,15 @@ export function buildServer(deps: {
   const quotesRepo = new QuotesRepo(deps.pool);
   const demandRepo = new DemandRepo(deps.pool);
   const geo = deps.geo ?? buildGeoResolver(deps.config);
+  const lrsRepo = new LrsRepo(deps.pool);
+  const docsRepo = new DocsRepo(deps.pool); // consumed by the driver LR/invoice-upload flow (later task)
+  const mint: MintDeps = { lrsRepo, loadsRepo, demandRepo, ownersRepo, waSender };
 
   registerOwnerRoutes(app, ownersRepo, preHandler);
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
   registerCallRoutes(app, orchestrator, callsRepo, preHandler);
   registerQuoteRoutes(app, { quotesRepo, orchestrator }, preHandler);
-  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, waSender }, preHandler);
+  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, waSender, mint }, preHandler);
   registerWebhookRoutes(app, {
     quotesRepo,
     callsRepo,
@@ -130,6 +136,7 @@ export function buildServer(deps: {
     ownersRepo,
     geo,
     secret: deps.config.webhookSecret,
+    mint,
   });
 
   if (interakt && waSender) {
@@ -140,7 +147,7 @@ export function buildServer(deps: {
       sessions: waSessions,
       ownersRepo,
       driver: { availability, interakt, sessions: waSessions, callsRepo, loadsRepo, config: deps.config },
-      customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config },
+      customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config, mint },
     });
   }
   return app;

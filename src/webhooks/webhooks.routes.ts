@@ -9,6 +9,7 @@ import { OwnersRepo } from "../owners/owners.repo.js";
 import { GeoResolver } from "../geo/geo.js";
 import { captureDemand } from "../demand/sourcing.js";
 import { recordAvailability } from "../quotes/availability.js";
+import { mintLr, MintDeps } from "../lr/mint.js";
 
 // Tolerant on field naming/types: our OVH agent sends camelCase, Plivo CX sends
 // snake_case (conversation_id) and may stringify the price / boolean.
@@ -85,6 +86,7 @@ export function registerWebhookRoutes(
     ownersRepo: OwnersRepo;
     geo: GeoResolver;
     secret: string;
+    mint: MintDeps;
   },
 ) {
   const preHandler = secretGuard(deps.secret);
@@ -241,7 +243,10 @@ export function registerWebhookRoutes(
 
     if (b.accepted) {
       const booked = await deps.demandRepo.book(demand.id);
-      if (booked && demand.loadId) await deps.loadsRepo.setStatus(demand.loadId, "BOOKED");
+      if (booked && demand.loadId) {
+        await deps.loadsRepo.setStatus(demand.loadId, "BOOKED");
+        await mintLr(deps.mint, demand.loadId);
+      }
       return reply.code(booked ? 200 : 409).send({ status: booked?.status ?? demand.status });
     }
     await deps.demandRepo.setStatus(demand.id, "DECLINED");

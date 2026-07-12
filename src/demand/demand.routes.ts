@@ -7,6 +7,7 @@ import { CallsRepo } from "../calls/calls.repo.js";
 import { CallOrchestrator } from "../calls/orchestrator.js";
 import { sourceDemand } from "./sourcing.js";
 import { WaSender } from "../wa/wa-sender.js";
+import { mintLr, MintDeps } from "../lr/mint.js";
 
 const STATUSES = [
   "NEW",
@@ -40,6 +41,7 @@ export function registerDemandRoutes(
     callsRepo: CallsRepo;
     orchestrator: CallOrchestrator;
     waSender?: WaSender;
+    mint: MintDeps;
   },
   preHandler: any,
 ) {
@@ -122,7 +124,10 @@ export function registerDemandRoutes(
     if (!d) return reply.code(404).send({ error: "not found" });
     const booked = await deps.demandRepo.book(d.id);
     if (!booked) return reply.code(409).send({ error: `cannot book from ${d.status}` });
-    if (booked.loadId) await deps.loadsRepo.setStatus(booked.loadId, "BOOKED");
+    if (booked.loadId) {
+      await deps.loadsRepo.setStatus(booked.loadId, "BOOKED");
+      await mintLr(deps.mint, booked.loadId);
+    }
     return { status: "BOOKED", loadId: booked.loadId };
   });
 
