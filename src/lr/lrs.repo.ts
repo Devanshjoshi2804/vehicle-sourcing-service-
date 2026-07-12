@@ -98,6 +98,10 @@ export class LrsRepo {
     );
   }
 
+  async setNeedsReview(id: string, needsReview = true): Promise<void> {
+    await this.pool.query(`UPDATE lrs SET needs_review=$2 WHERE id=$1`, [id, needsReview]);
+  }
+
   // Rate-limits driver uploads: foreign LRs minted by this owner today.
   async countCreatedToday(ownerId: string): Promise<number> {
     const { rows } = await this.pool.query(
