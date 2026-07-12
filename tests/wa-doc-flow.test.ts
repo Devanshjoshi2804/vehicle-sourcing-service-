@@ -293,6 +293,27 @@ describe("doc-flow: LR branch", () => {
     expect(sent.length).toBe(1); // no second send — HAAN never reached resolveLr
   });
 
+  it("12b. typed foreign LR number never mints a load — replies 'not found', no load/lr created", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({ ok: false, reason: "unused" }), client);
+    const phone = digits(s.owner.phone);
+
+    const before = (await pool.query(`SELECT count(*)::int AS n FROM loads`)).rows[0].n;
+
+    // LR-shaped (has a digit, matches the pattern) but not a real LR — e.g. a
+    // mistyped vehicle type. Typing this must never mint a load, unlike the
+    // same shape arriving via a photo (media foreign-create path).
+    const handled = await handleTypedLr(d, "16ft", s.owner, phone);
+    expect(handled).toBe(true);
+    expect(sent[0].args[0]).toBe("LR 16FT not found — our team will check.");
+    expect(await s.lrs.getByNumber("16FT")).toBeNull();
+
+    const after = (await pool.query(`SELECT count(*)::int AS n FROM loads`)).rows[0].n;
+    expect(after).toBe(before); // no load minted
+  });
+
   it("bonus: media > 8 MB → too-big reply, doc stored unprocessed", async () => {
     const { pool } = await withTestDb();
     const s = await seed(pool);
@@ -347,6 +368,30 @@ describe("doc-flow: invoice branch", () => {
     const doc = await latestDocFor(pool, digits(s.owner.phone));
     expect(doc.dispute).toBe("DISPUTED");
     expect(doc.variance_inr).toBe(2500);
+  });
+
+  it("14b. invoice bearing ANOTHER driver's LR number → ownership check fails, falls through to NO_TRIP (no DISPUTED doc on that lr/load)", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool); // s.lr (PIN-4K7KQ2) is owned by s.owner
+    const stranger = await s.owners.createOwner({
+      name: "Stranger", phone: "+919111100088", vehicleTypes: ["16ft"], lanes: [], channel: "whatsapp",
+    } as any);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({
+      ok: true, doc: { docType: "invoice", lrNumber: "PIN-4K7KQ2", billedTotalInr: 16500 },
+    }), client);
+    await handleDriverMedia(d, mediaMsg(stranger.phone, "i14b"), stranger as Owner);
+
+    // no BOOKED load for the stranger → falls all the way to NO_TRIP, not the direct-match reply
+    expect(sent[0].args[0]).toMatch(/Which LR is this invoice for/);
+    const doc = await latestDocFor(pool, digits(stranger.phone));
+    expect(doc.kind).toBe("invoice");
+    expect(doc.load_id).toBeNull();
+    expect(doc.dispute).not.toBe("DISPUTED");
+
+    // the other driver's LR/load must be untouched
+    const loadDocs = await s.docs.listByLoad(s.load.id);
+    expect(loadDocs.some((x) => x.dispute === "DISPUTED")).toBe(false);
   });
 
   it("15. invoice without LR ref, one BOOKED load → guess+confirm buttons, invy links + computes variance", async () => {

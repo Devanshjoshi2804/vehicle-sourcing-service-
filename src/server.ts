@@ -132,8 +132,10 @@ export function buildServer(deps: {
   const lrsRepo = new LrsRepo(deps.pool);
   const docsRepo = new DocsRepo(deps.pool);
   const mint: MintDeps = { lrsRepo, loadsRepo, demandRepo, ownersRepo, waSender };
-  const vision =
-    deps.vision ?? (deps.config.geminiApiKey || deps.config.mistralApiKey ? buildVisionClient(deps.config) : undefined);
+  // Always built — buildVisionClient's no_provider path (no gemini/mistral key)
+  // makes no network calls, it just returns ok:false so docs still get stored
+  // unprocessed for manual review instead of the pipeline silently not running.
+  const vision = deps.vision ?? buildVisionClient(deps.config);
 
   registerOwnerRoutes(app, ownersRepo, preHandler);
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
@@ -156,9 +158,7 @@ export function buildServer(deps: {
   if (interakt && waSender) {
     const availability = { quotesRepo, callsRepo, loadsRepo, demandRepo, orchestrator };
     const capture = { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, geo };
-    const docs = vision
-      ? { vision, lrsRepo, docsRepo, loadsRepo, demandRepo, interakt, sessions: waSessions, config: deps.config }
-      : undefined;
+    const docs = { vision, lrsRepo, docsRepo, loadsRepo, demandRepo, interakt, sessions: waSessions, config: deps.config };
     registerWaRoutes(app, {
       config: deps.config,
       sessions: waSessions,

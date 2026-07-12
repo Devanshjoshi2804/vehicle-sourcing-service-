@@ -30,6 +30,7 @@ const WRONG_DRIVER = "This LR belongs to a different vehicle — our team will c
 const FUZZY_NOT_FOUND = "Couldn't match this LR — please type the LR number.";
 const foreignCreated = (n: string) => `New LR ${n} registered — our team will verify.`;
 const overCap = (n: string) => `Got it — LR ${n} noted, our team will check and get back to you.`;
+const typedForeignNotFound = (n: string) => `LR ${n} not found — our team will check.`;
 
 // Uppercase, strip all whitespace, collapse repeated dashes; O→0 / I→1 only in
 // the tail after a 'PIN-' prefix (a foreign number's own letters are untouched).
@@ -103,6 +104,7 @@ async function resolveLr(
   owner: Owner,
   phone: string,
   extra: VisionFields,
+  opts: { allowCreate: boolean },
 ): Promise<{ reply: string; lr: Lr | null }> {
   const normalized = normalizeLrNumber(rawNumber);
   let lr = await deps.lrsRepo.getByNumber(normalized);
@@ -140,6 +142,12 @@ async function resolveLr(
 
   if (normalized.startsWith("PIN-")) {
     return { reply: FUZZY_NOT_FOUND, lr: null };
+  }
+
+  // Typed text never mints a load — only a photo's OCR'd fields are trustworthy
+  // enough to found a new load/lr on. A typed foreign number just gets "not found".
+  if (!opts.allowCreate) {
+    return { reply: typedForeignNotFound(normalized), lr: null };
   }
 
   // Foreign number: create a load + lr from the OCR'd fields, rate-capped per driver/day.
@@ -232,10 +240,13 @@ async function resolveInvoice(deps: DocFlowDeps, m: WaInbound, owner: Owner, doc
   const mediaUrl = m.mediaUrl!;
   const extracted = doc as unknown as Record<string, unknown>;
 
-  // 1. OCR'd lr_number → lr → load (direct match, no confirmation needed).
+  // 1. OCR'd lr_number → lr → load (direct match, no confirmation needed) —
+  // but only when the LR actually belongs to this sender. An LR mapped to a
+  // different driver must never echo the agreed price or get linked here;
+  // fall through to the guess/NO_TRIP path as if the ref hadn't matched.
   if (doc.lrNumber) {
     const lr = await deps.lrsRepo.getByNumber(normalizeLrNumber(doc.lrNumber));
-    if (lr?.loadId) {
+    if (lr?.loadId && (!lr.ownerId || lr.ownerId === owner.id)) {
       const load = await deps.loadsRepo.getLoad(lr.loadId);
       if (load) {
         await scoreAndUpsertInvoice(deps, owner, m.from, mediaUrl, extracted, load, lr.id, doc.billedTotalInr);
@@ -369,7 +380,7 @@ export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: 
   const { reply, lr } = await resolveLr(deps, doc.lrNumber, owner, m.from, {
     billedTotalInr: doc.billedTotalInr, vehicleNo: doc.vehicleNo, from: doc.from, to: doc.to,
     docDate: doc.docDate, paidStampSeen: doc.paidStampSeen,
-  });
+  }, { allowCreate: true });
   await deps.docsRepo.upsert({
     ownerId: owner.id, phone: m.from, loadId: lr?.loadId ?? null, lrId: lr?.id ?? null,
     kind: "lr", mediaUrl, extracted: doc as unknown as Record<string, unknown>,
@@ -384,7 +395,7 @@ export async function handleTypedLr(deps: DocFlowDeps, text: string, owner: Owne
   if (!looksLikeLrNumber(text)) return false;
   const { reply } = await resolveLr(deps, text, owner, phone, {
     billedTotalInr: null, vehicleNo: null, from: null, to: null, docDate: null, paidStampSeen: false,
-  });
+  }, { allowCreate: false });
   await deps.interakt.sendText(phone, reply);
   return true;
 }

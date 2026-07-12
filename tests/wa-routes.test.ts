@@ -128,6 +128,45 @@ describe("driver document intake (media)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].kind).toBe("other");
   });
+
+  it("two media messages with different media_urls within the dedup window are BOTH processed (not collapsed to one action key)", async () => {
+    const { pool } = await withTestDb();
+    const { client, sent } = fakeInterakt();
+    const stubVision: VisionClient = {
+      async extract() {
+        return {
+          ok: true,
+          doc: {
+            docType: "other", lrNumber: null, billedTotalInr: null, vehicleNo: null,
+            from: null, to: null, docDate: null, paidStampSeen: false, confidence: 0.9,
+          },
+        };
+      },
+    };
+    const app = buildServer({
+      pool, config, interakt: client, vision: stubVision,
+      el: { originateCall: async () => ({ conversationId: "c" }) } as any,
+    });
+    const phone = "+919111111188";
+    await app.inject({ method: "POST", url: "/owners", headers: auth,
+      payload: { name: "Driver2", phone, vehicleTypes: ["16ft"], lanes: [] } });
+
+    const mediaPayload = (id: string, url: string) => ({
+      type: "message_received",
+      data: {
+        customer: { channel_phone_number: phone, traits: { name: "Driver2" } },
+        message: { id, message_content_type: "Image", media_url: url },
+      },
+    });
+
+    await post(app, mediaPayload("m_photo1", "https://ik.media/photo1.jpg"));
+    await new Promise((r) => setTimeout(r, 100));
+    await post(app, mediaPayload("m_photo2", "https://ik.media/photo2.jpg")); // different msg id + url, within 45s window
+    await new Promise((r) => setTimeout(r, 100));
+
+    const { rows } = await pool.query(`SELECT * FROM driver_docs WHERE phone=$1`, [phone.replace(/\D/g, "")]);
+    expect(rows).toHaveLength(2); // both photos processed — not deduped against each other
+  });
 });
 
 describe("role follows owner active state", () => {

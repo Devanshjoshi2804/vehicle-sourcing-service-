@@ -63,8 +63,9 @@ export async function mintLr(deps: MintDeps, loadId: string): Promise<Lr | null>
     }
 
     return lr;
-  } catch {
+  } catch (e) {
     // ponytail: mint is best-effort — a failure must never break the booking that triggered it
+    console.error("[lr] mint failed for load", loadId, e);
     return null;
   }
 }

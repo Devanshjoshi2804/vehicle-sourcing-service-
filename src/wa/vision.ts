@@ -28,7 +28,7 @@ function toDoc(raw: any): VisionDoc {
   return {
     docType,
     lrNumber: str(raw?.lr_number),
-    billedTotalInr: Number.isFinite(total) && total > 0 ? total : null,
+    billedTotalInr: Number.isFinite(total) && total > 0 ? Math.round(total) : null,
     vehicleNo: str(raw?.vehicle_no),
     from: str(raw?.from),
     to: str(raw?.to),
@@ -48,6 +48,7 @@ async function callGemini(config: Config, fetchImpl: typeof fetch, mime: string,
         contents: [{ parts: [{ inline_data: { mime_type: mime, data } }, { text: PROMPT }] }],
         generationConfig: { temperature: 0, response_mime_type: "application/json" },
       }),
+      signal: AbortSignal.timeout(30_000),
     }
   );
   if (!res.ok) throw new Error(`gemini ${res.status}`);
@@ -74,6 +75,7 @@ async function callMistral(config: Config, fetchImpl: typeof fetch, mime: string
         },
       ],
     }),
+    signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`mistral ${res.status}`);
   const json: any = await res.json();
@@ -86,9 +88,13 @@ export function buildVisionClient(config: Config, fetchImpl: typeof fetch = fetc
     async extract(mediaUrl: string) {
       if (!config.geminiApiKey && !config.mistralApiKey) return { ok: false, reason: "no_provider" };
 
+      // ponytail: SSRF guard — only fetch https media urls (BSP-hosted media is
+      // always https; http:// could be a probe against internal infra).
+      if (!mediaUrl.startsWith("https://")) return { ok: false, reason: "fetch_failed" };
+
       let mediaRes: Response;
       try {
-        mediaRes = await fetchImpl(mediaUrl);
+        mediaRes = await fetchImpl(mediaUrl, { signal: AbortSignal.timeout(30_000) });
       } catch {
         return { ok: false, reason: "fetch_failed" };
       }

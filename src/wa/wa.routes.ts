@@ -54,7 +54,10 @@ export function registerWaRoutes(
         // Interakt delivers one button tap as TWO events (the message + a
         // button-click status) with DIFFERENT message ids, so msgId dedup can't
         // catch it. Dedup on the resolved action within a short window instead.
-        const actionKey = m.kind === "reply" ? `r:${m.replyId}` : `t:${(m.text ?? "").trim().toLowerCase()}`;
+        const actionKey =
+          m.kind === "reply" ? `r:${m.replyId}` :
+          m.kind === "media" ? `m:${m.mediaUrl}` :
+          `t:${(m.text ?? "").trim().toLowerCase()}`;
         const last = (fresh?.ctx as any)?.lastInbound;
         if (last?.key === actionKey && Date.now() - Number(last.ts) < 45_000) return;
         // Role comes from the CURRENT owner match, not the cached session role —

@@ -110,12 +110,28 @@ describe("vision client", () => {
     expect(f).toHaveBeenCalledTimes(1); // only the media fetch
   });
 
+  it("rejects a non-https media url as fetch_failed without calling fetch at all (SSRF guard)", async () => {
+    const f = makeFetch();
+    const client = buildVisionClient(loadConfig({ ...baseEnv, GEMINI_API_KEY: "g" } as any), f);
+    const result = await client.extract("http://media.example.com/doc123.jpg");
+    expect(result).toEqual({ ok: false, reason: "fetch_failed" });
+    expect(f).not.toHaveBeenCalled();
+  });
+
   it("returns no_provider and makes no fetches without any API key", async () => {
     const f = makeFetch();
     const client = buildVisionClient(loadConfig({ ...baseEnv } as any), f);
     const result = await client.extract(MEDIA_URL);
     expect(result).toEqual({ ok: false, reason: "no_provider" });
     expect(f).not.toHaveBeenCalled();
+  });
+
+  it("rounds a fractional billed_total_inr from the OCR provider (avoids a 22P02 on an integer column)", async () => {
+    const f = makeFetch({ geminiText: JSON.stringify({ ...FULL_RAW_DOC, billed_total_inr: 16500.5 }) });
+    const client = buildVisionClient(loadConfig({ ...baseEnv, GEMINI_API_KEY: "g" } as any), f);
+    const result = await client.extract(MEDIA_URL);
+    expect(result.ok).toBe(true);
+    expect((result as any).doc.billedTotalInr).toBe(16501);
   });
 
   it("returns extract_failed for a PDF with only a Mistral key (pixtral is images-only)", async () => {
