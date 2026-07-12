@@ -28,6 +28,7 @@ import { buildLoadParser } from "./wa/llm-parse.js";
 import { LrsRepo } from "./lr/lrs.repo.js";
 import { DocsRepo } from "./lr/docs.repo.js";
 import { MintDeps } from "./lr/mint.js";
+import { registerLrRoutes } from "./lr/lr.routes.js";
 import { buildVisionClient, VisionClient } from "./wa/vision.js";
 
 export function buildServer(deps: {
@@ -131,6 +132,7 @@ export function buildServer(deps: {
   registerCallRoutes(app, orchestrator, callsRepo, preHandler);
   registerQuoteRoutes(app, { quotesRepo, orchestrator }, preHandler);
   registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, waSender, mint }, preHandler);
+  registerLrRoutes(app, { lrsRepo, docsRepo, loadsRepo, demandRepo, ownersRepo, waSender }, preHandler);
   registerWebhookRoutes(app, {
     quotesRepo,
     callsRepo,
