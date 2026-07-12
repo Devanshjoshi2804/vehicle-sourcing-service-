@@ -91,15 +91,45 @@ export class DocsRepo {
   // (load_id/lr_id null) to the trip the driver just confirmed. Updates the
   // SAME row by id — a plain upsert() would insert a second row instead, since
   // this row's lr_id is only becoming non-null now.
+  // On 23505 collision (existing invoice for same owner/lr/kind), merges into
+  // the existing row and deletes the pending row.
   async linkInvoice(
     id: string,
     p: { loadId: string; lrId: string | null; billedInr: number | null; varianceInr: number | null; dispute: DriverDoc["dispute"] },
   ): Promise<DriverDoc | null> {
-    const { rows } = await this.pool.query(
-      `UPDATE driver_docs SET load_id=$2, lr_id=$3, billed_inr=$4, variance_inr=$5, dispute=$6 WHERE id=$1 RETURNING *`,
-      [id, p.loadId, p.lrId, p.billedInr, p.varianceInr, p.dispute],
-    );
-    return rows[0] ? rowToDoc(rows[0]) : null;
+    try {
+      const { rows } = await this.pool.query(
+        `UPDATE driver_docs SET load_id=$2, lr_id=$3, billed_inr=$4, variance_inr=$5, dispute=$6 WHERE id=$1 RETURNING *`,
+        [id, p.loadId, p.lrId, p.billedInr, p.varianceInr, p.dispute],
+      );
+      return rows[0] ? rowToDoc(rows[0]) : null;
+    } catch (err: any) {
+      // 23505: unique constraint violation on driver_docs_owner_lr_kind.
+      // A doc already exists for this (owner_id, lr_id, kind) combo.
+      // ponytail: merge into existing row by fetching its id, updating it, and deleting pending.
+      if (err.code !== "23505") throw err;
+
+      // Fetch the pending doc to get owner_id and kind for the existing doc lookup.
+      const pending = await this.getById(id);
+      if (!pending || !p.lrId) return null;
+
+      // Find the existing doc that conflicted (already matched invoice for this trip).
+      const { rows: existing } = await this.pool.query(
+        `SELECT id FROM driver_docs WHERE owner_id=$1 AND lr_id=$2 AND kind='invoice' AND lr_id IS NOT NULL`,
+        [pending.ownerId, p.lrId],
+      );
+      if (!existing[0]) return null;
+
+      const existingId = existing[0].id;
+      // Update the existing row with the new media + dispute details from the pending doc.
+      const { rows } = await this.pool.query(
+        `UPDATE driver_docs SET media_url=$2, extracted=$3, billed_inr=$4, variance_inr=$5, dispute=$6 WHERE id=$1 RETURNING *`,
+        [existingId, pending.mediaUrl, JSON.stringify(pending.extracted), p.billedInr, p.varianceInr, p.dispute],
+      );
+      // Delete the orphaned pending row.
+      await this.pool.query(`DELETE FROM driver_docs WHERE id=$1`, [id]);
+      return rows[0] ? rowToDoc(rows[0]) : null;
+    }
   }
 
   // DISPUTED → RESOLVED only; anything else is a no-op (null).

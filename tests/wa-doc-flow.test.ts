@@ -429,4 +429,62 @@ describe("doc-flow: invoice branch", () => {
 
     expect(sent[0].args[0]).toMatch(/type the amount/);
   });
+
+  it("19. resend invoice for same trip → collision merged, existing row updated, pending deleted", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+
+    // Create a direct invoice doc for the LR (already matched).
+    const existingDoc = await s.docs.upsert({
+      ownerId: s.owner.id,
+      phone: digits(s.owner.phone),
+      lrId: s.lr.id,
+      loadId: s.load.id,
+      kind: "invoice",
+      mediaUrl: "https://media.example/first.jpg",
+      billedInr: 14000,
+      varianceInr: 0,
+      dispute: "NONE",
+    });
+
+    // Create a second pending invoice doc (no lrId yet).
+    const pendingDoc = await s.docs.upsert({
+      ownerId: s.owner.id,
+      phone: digits(s.owner.phone),
+      lrId: null,
+      loadId: null,
+      kind: "invoice",
+      mediaUrl: "https://media.example/second.jpg",
+      billedInr: 16500,
+      varianceInr: 2500,
+      dispute: "DISPUTED",
+    });
+
+    // Link the pending doc to the same (owner_id, lr_id, kind) → collision.
+    // Should MERGE into existing row and delete pending row.
+    const result = await s.docs.linkInvoice(pendingDoc.id, {
+      loadId: s.load.id,
+      lrId: s.lr.id,
+      billedInr: 16500,
+      varianceInr: 2500,
+      dispute: "DISPUTED",
+    });
+
+    // Should not throw; should return the merged row.
+    expect(result).toBeTruthy();
+    expect(result?.id).toBe(existingDoc.id);
+    expect(result?.mediaUrl).toBe("https://media.example/second.jpg");
+    expect(result?.billedInr).toBe(16500);
+    expect(result?.varianceInr).toBe(2500);
+    expect(result?.dispute).toBe("DISPUTED");
+
+    // Pending row should be deleted.
+    const deleted = await s.docs.getById(pendingDoc.id);
+    expect(deleted).toBeNull();
+
+    // Only one invoice doc for this LR should exist.
+    const allDocs = await s.docs.listByLoad(s.load.id);
+    const invoiceDocs = allDocs.filter((d) => d.kind === "invoice");
+    expect(invoiceDocs).toHaveLength(1);
+  });
 });
