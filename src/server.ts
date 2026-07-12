@@ -87,6 +87,14 @@ export function buildServer(deps: {
       done(null, {});
     }
   });
+  // Malformed ids reach pg as bad uuid casts (22P02). Map to a clean 400 instead
+  // of a 500 that leaks the database error; everything else keeps default handling.
+  app.setErrorHandler((err: any, _req, reply) => {
+    if (err?.code === "22P02") return reply.code(400).send({ error: "invalid id" });
+    app.log.error({ err }, "unhandled route error");
+    return reply.code(err?.statusCode && err.statusCode < 500 ? err.statusCode : 500)
+      .send({ error: err?.statusCode && err.statusCode < 500 ? err.message : "internal error" });
+  });
   // Dispatcher console is a browser SPA on another origin; the API key gates access.
   app.register(cors, { origin: true });
   app.get("/health", async () => ({ status: "ok" }));

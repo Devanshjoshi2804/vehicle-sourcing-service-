@@ -145,4 +145,12 @@ describe("lr console routes", () => {
     const res = await app.inject({ method: "POST", url: `/docs/${doc.id}/resolve-dispute`, headers: auth });
     expect(res.statusCode).toBe(409);
   });
+
+  it("malformed :id returns a clean 400, not a leaked pg error", async () => {
+    const { pool } = await withTestDb();
+    const app = buildServer({ pool, config });
+    const res = await app.inject({ method: "POST", url: "/lrs/not-a-uuid/mark-paid", headers: auth });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "invalid id" });
+  });
 });
