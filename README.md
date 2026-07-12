@@ -154,6 +154,40 @@ title, a tap resolves to the driver's latest offer (see `src/wa/inbound.ts`).
 `INTERAKT_API_KEY` + `INTERAKT_WEBHOOK_SECRET` in `.env`, submit the two
 templates for approval.
 
+### Driver documents
+
+Drivers send **LR (lorry receipt) or invoice photos** to the WhatsApp bot for status checks and invoice reconciliation. The system classifies each photo (LR, invoice, or other), matches it to the driver's trip, and returns payment status or flags invoice discrepancies for review.
+
+**LR minting:** Every load that reaches **BOOKED** mints an LR number (`PIN-` + 6 alphanumerics) and notifies the driver. The driver can send a photo anytime; the bot replies with status (PAID on date / UNPAID) or creates a new load if the LR is from a foreign source.
+
+| Photo matches | Bot reply | Dispatcher sees |
+|---|---|---|
+| Ours, mapped to this driver | Status + trip route | doc chip on load |
+| Ours, mapped to another driver | "Belongs to a different vehicle" | doc + ⚠️ console flag |
+| Ours, unmapped | Status or "create new LR" flow | doc linked |
+| `PIN-…` typed (no photo) | Status lookup from text | — |
+| Foreign number | "New LR registered — we'll verify" | load + LR `needs_review`, capped 5/driver/day |
+| Unreadable | "Couldn't read this — type the number" | doc stored as `unprocessed` |
+
+**Invoices:** If the photo is an invoice, the system extracts the billed total and compares to the agreed freight. Match → bot confirms receipt; mismatch → doc marked **DISPUTED** and flagged for console review (exact match only in v1; no tolerance).
+
+**Console actions** (Bearer API key):
+- `POST /lrs/:id/mark-paid` — flip status to PAID, send WA notify `💰 Payment released for LR PIN-… (₹14,000)`
+- `POST /docs/:id/resolve-dispute` — update dispute status after review
+- `GET /loads/:id/docs` — view all docs + LR for a load
+
+**Env vars:**
+```bash
+GEMINI_API_KEY=             # vision extraction (Gemini)
+GEMINI_MODEL=gemini-flash-latest
+MISTRAL_API_KEY=            # fallback vision (Mistral pixtral, image-only)
+MISTRAL_MODEL=pixtral-12b-2409
+LR_CREATE_DAILY_CAP=5       # foreign LRs per driver per day
+DOC_MAX_BYTES=8388608       # 8 MB media size cap
+```
+
+Without a vision key, photos are stored unprocessed for manual review.
+
 ## Prerequisites
 
 - Node 20+
