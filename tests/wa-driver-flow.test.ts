@@ -238,3 +238,14 @@ describe("accept on a load already locked to the same driver", () => {
     expect(texts.some((t) => /another driver/.test(t))).toBe(false);
   });
 });
+
+describe("driver help menu", () => {
+  it("unknown text with no live offer gets the walkthrough, not a bare greeting", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent, calls, attempt } = await setup(pool);
+    await calls.setStatus(attempt.id, "DONE", { ended: true }); // no live offer
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "text", text: "madad chahiye bhai" }) as any, null);
+    const texts = sent.filter((s) => s.kind === "text").map((s) => String(s.args[0]));
+    expect(texts.some((t) => /bilty/.test(t) && /Invoice/.test(t) && /load matches your route/.test(t))).toBe(true);
+  });
+});

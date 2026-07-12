@@ -10,6 +10,7 @@ import { WaSessionsRepo, WaSession } from "./wa-sessions.repo.js";
 import { WaInbound } from "./inbound.js";
 import { Owner } from "../owners/owners.schema.js";
 import { inr } from "./wa-sender.js";
+import { parseIntent } from "./intent.js";
 
 export type DocFlowDeps = {
   vision: VisionClient;
@@ -23,14 +24,40 @@ export type DocFlowDeps = {
 };
 
 // ---- copy strings — VERBATIM per spec, don't reword ----
-const UNREADABLE = "Couldn't read this — please type the LR number, or our team will check.";
-const NON_FREIGHT = "This doesn't look like an LR or invoice. Send a photo of the document, or type your LR number.";
-const TOO_LARGE = "This file is too big — please send a clearer photo under 8 MB.";
-const WRONG_DRIVER = "This LR belongs to a different vehicle — our team will check.";
-const FUZZY_NOT_FOUND = "Couldn't match this LR — please type the LR number.";
-const foreignCreated = (n: string) => `New LR ${n} registered — our team will verify.`;
-const overCap = (n: string) => `Got it — LR ${n} noted, our team will check and get back to you.`;
-const typedForeignNotFound = (n: string) => `LR ${n} not found — our team will check.`;
+// First line stays VERBATIM per spec; the lines below it walk a real driver
+// through what happened and what to do, in simple Hindi.
+const PHOTO_TIPS =
+  "Dobara koshish karein:\n1️⃣ Poora document frame mein ho\n2️⃣ Roshni achhi ho, photo dhundhli na ho\n3️⃣ Seedha upar se photo lein";
+const UNREADABLE = `Couldn't read this — please type the LR number, or our team will check.
+
+😕 Photo saaf nahi padh paya. ${PHOTO_TIPS}
+
+Ya seedha *LR number type kar dein* (jaise PIN-ABC123) — main turant status bata dunga 👍`;
+const NON_FREIGHT = `This doesn't look like an LR or invoice. Send a photo of the document, or type your LR number.
+
+🤔 Ye LR ya invoice nahi lag raha.
+📄 *LR / bilty* = loading ke waqt milne wali parchi (usme LR number likha hota hai)
+🧾 *Invoice / bill* = bhade ka bill jisme total amount likha ho
+
+Inme se kisi ki photo bhejein — ya LR number type karein (jaise PIN-ABC123).`;
+const TOO_LARGE = `This file is too big — please send a clearer photo under 8 MB.
+
+📸 File badi hai — WhatsApp se normal photo bhejein (document nahi), wo chal jayegi.`;
+const WRONG_DRIVER = `This LR belongs to a different vehicle — our team will check.
+
+⚠️ Ye LR kisi aur gaadi ke naam par hai. Hamari team check karke aapse baat karegi 🙏`;
+const FUZZY_NOT_FOUND = `Couldn't match this LR — please type the LR number.
+
+🔎 Ye number system mein nahi mila. LR par likha number *type kar dein* (jaise PIN-ABC123) — shayad photo mein galat padha gaya ho.`;
+const foreignCreated = (n: string) => `New LR ${n} registered — our team will verify.
+
+✅ Humne LR ${n} register kar liya hai. Team verify karke aapko yahin update degi.`;
+const overCap = (n: string) => `Got it — LR ${n} noted, our team will check and get back to you.
+
+📝 Note kar liya hai — team jald aapse sampark karegi 🙏`;
+const typedForeignNotFound = (n: string) => `LR ${n} not found — our team will check.
+
+🔎 Ye number system mein nahi mila. Agar LR ki photo hai to bhej dein — team bhi dekh legi.`;
 
 // Uppercase, strip all whitespace, collapse repeated dashes; O→0 / I→1 only in
 // the tail after a 'PIN-' prefix (a foreign number's own letters are untouched).
@@ -81,9 +108,13 @@ async function buildStatusReply(deps: DocFlowDeps, lr: Lr): Promise<string> {
     const d = lr.paidAt
       ? new Date(lr.paidAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
       : "";
-    return `LR ${lr.lrNumber} · ${from}→${to} · PAID on ${d}${suffix}`;
+    return `LR ${lr.lrNumber} · ${from}→${to} · PAID on ${d}${suffix}
+
+✅ Is LR ka payment ho chuka hai. Koi sawaal ho to yahin poochein 🙏`;
   }
-  return `LR ${lr.lrNumber} · ${from}→${to} · UNPAID — payment under process${suffix}`;
+  return `LR ${lr.lrNumber} · ${from}→${to} · UNPAID — payment under process${suffix}
+
+⏳ Payment process mein hai — release hote hi main yahin message karunga 💰`;
 }
 
 type VisionFields = {
@@ -182,11 +213,19 @@ async function resolveLr(
 }
 
 // ---- invoice branch copy — VERBATIM per spec ----
-const NO_TRIP = "Which LR is this invoice for? Please type the LR number.";
-const NO_TOTAL = "Couldn't read the invoice amount — please type the amount (e.g. 16500 or 16.5k).";
-const invoiceMatch = (n: number) => `🧾 Invoice received: ${inr(n)} — matches the agreed freight.`;
+const NO_TRIP = `Which LR is this invoice for? Please type the LR number.
+
+🧾 Ye invoice kis trip ka hai? Uska *LR number type kar dein* (jaise PIN-ABC123) taaki main sahi trip se jod sakun.`;
+const NO_TOTAL = `Couldn't read the invoice amount — please type the amount (e.g. 16500 or 16.5k).
+
+😕 Bill ka total amount padh nahi paya — bas *amount type kar dein* (jaise 16500 ya 16.5k).`;
+const invoiceMatch = (n: number) => `🧾 Invoice received: ${inr(n)} — matches the agreed freight.
+
+✅ Sab sahi hai — amount tay kiye gaye bhade se match karta hai. Team ko mil gaya hai.`;
 const invoiceDispute = (billed: number, agreed: number, diff: number) =>
-  `🧾 Invoice: ${inr(billed)} vs agreed ${inr(agreed)} — difference ${inr(diff)} flagged for review.`;
+  `🧾 Invoice: ${inr(billed)} vs agreed ${inr(agreed)} — difference ${inr(diff)} flagged for review.
+
+⚠️ Amount tay kiye gaye bhade se alag hai, isliye team review karegi. Jald update milega 🙏`;
 const guessConfirmBody = (from: string, to: string, agreed: number) =>
   `Is this invoice for ${from}→${to} · ${inr(agreed)}? `;
 
@@ -377,6 +416,33 @@ export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: 
     return;
   }
 
+  // Shaky read (photo quality): confirm the number with the driver BEFORE acting
+  // on it — a mis-read number could show someone else's status or mint a junk LR.
+  if (doc.confidence < 0.7) {
+    const normalized = normalizeLrNumber(doc.lrNumber);
+    await storeUnprocessed(doc as unknown as Record<string, unknown>);
+    const opts = await deps.interakt.sendButtons(
+      m.from,
+      `📷 Photo thodi dhundhli hai. Maine LR number *${normalized}* padha — sahi hai?`,
+      [
+        { id: `lrok:${normalized}`, title: "✅ Sahi hai" },
+        { id: "lrno:x", title: "❌ Galat hai" },
+      ],
+    );
+    await deps.sessions.upsert({
+      phone: m.from, role: "driver", state: "CONFIRM_LR_READ",
+      ctx: {
+        lrNumber: normalized, mediaUrl,
+        fields: {
+          billedTotalInr: doc.billedTotalInr, vehicleNo: doc.vehicleNo, from: doc.from,
+          to: doc.to, docDate: doc.docDate, paidStampSeen: doc.paidStampSeen,
+        },
+      },
+      lastOptions: opts,
+    });
+    return;
+  }
+
   const { reply, lr } = await resolveLr(deps, doc.lrNumber, owner, m.from, {
     billedTotalInr: doc.billedTotalInr, vehicleNo: doc.vehicleNo, from: doc.from, to: doc.to,
     docDate: doc.docDate, paidStampSeen: doc.paidStampSeen,
@@ -387,6 +453,68 @@ export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: 
     billedInr: doc.billedTotalInr ?? null, dispute: "NONE",
   });
   await say(reply);
+}
+
+// Driver-flow calls this while a CONFIRM_LR_READ session is live (shaky vision
+// read awaiting the driver's confirmation). Handles button taps AND typed
+// haan/nahi/corrected-number; false = not ours, caller falls through. Media
+// always falls through so a re-sent (better) photo restarts extraction.
+export async function handleLrReadConfirm(
+  deps: DocFlowDeps, m: WaInbound, session: WaSession | null, owner: Owner,
+): Promise<boolean> {
+  if (!session || session.state !== "CONFIRM_LR_READ" || m.kind === "media") return false;
+  const ctxNumber = String(session.ctx?.lrNumber ?? "");
+  const mediaUrl = String(session.ctx?.mediaUrl ?? "");
+  const fields = (session.ctx?.fields ?? {
+    billedTotalInr: null, vehicleNo: null, from: null, to: null, docDate: null, paidStampSeen: false,
+  }) as VisionFields;
+
+  async function proceed(withNumber: string, allowCreate: boolean) {
+    await deps.sessions.clear(m.from);
+    const { reply, lr } = await resolveLr(deps, withNumber, owner, m.from, fields, { allowCreate });
+    if (mediaUrl) {
+      await deps.docsRepo.upsert({
+        ownerId: owner.id, phone: m.from, loadId: lr?.loadId ?? null, lrId: lr?.id ?? null,
+        kind: "lr", mediaUrl, extracted: { lrNumber: withNumber, ...fields }, dispute: "NONE",
+      });
+    }
+    await deps.interakt.sendText(m.from, reply);
+  }
+
+  if (m.kind === "reply" && m.replyId) {
+    if (m.replyId === `lrok:${ctxNumber}` && ctxNumber) {
+      await proceed(ctxNumber, true);
+      return true;
+    }
+    if (m.replyId.startsWith("lrno:")) {
+      await deps.sessions.clear(m.from);
+      await deps.interakt.sendText(
+        m.from,
+        "Koi baat nahi 👍 LR par likha number *type kar dein* (jaise PIN-ABC123), ya saaf photo dobara bhejein.",
+      );
+      return true;
+    }
+    return false;
+  }
+
+  const text = (m.text ?? "").trim();
+  if (looksLikeLrNumber(text)) {
+    // driver typed the corrected number — trust it, but typed never creates
+    await proceed(text, false);
+    return true;
+  }
+  const intent = parseIntent(text);
+  if (intent.kind === "yes" && ctxNumber) {
+    await proceed(ctxNumber, true);
+    return true;
+  }
+  if (intent.kind === "no") {
+    await deps.sessions.clear(m.from);
+    await deps.interakt.sendText(m.from, `Koi baat nahi 👍 LR par likha number *type kar dein* (jaise PIN-ABC123), ya saaf photo dobara bhejein.`);
+    return true;
+  }
+  await deps.interakt.sendText(m.from, `Maine *${ctxNumber}* padha tha — ✅ Sahi hai ya ❌ Galat hai button dabayein, ya sahi number type kar dein.`);
+  return true;
 }
 
 // Typed LR numbers hit the same lookup (spec: "checked only AFTER the live-offer

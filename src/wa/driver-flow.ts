@@ -8,7 +8,7 @@ import { LoadsRepo } from "../loads/loads.repo.js";
 import { inr } from "./wa-sender.js";
 import { parseIntent, parsePriceText } from "./intent.js";
 import { Owner } from "../owners/owners.schema.js";
-import { DocFlowDeps, handleDriverMedia, handleTypedLr, handleInvoiceConfirm, applyTypedInvoiceAmount } from "./doc-flow.js";
+import { DocFlowDeps, handleDriverMedia, handleTypedLr, handleInvoiceConfirm, handleLrReadConfirm, applyTypedInvoiceAmount } from "./doc-flow.js";
 
 export type DriverFlowDeps = {
   availability: AvailabilityDeps;
@@ -88,6 +88,8 @@ export async function handleDriverMessage(
     // invy:/invn: (invoice trip confirm) — falls through (returns false) for
     // any other button so the acc/ctr/no handling below still runs.
     if (deps.docs && (await handleInvoiceConfirm(deps.docs, m, session))) return;
+    // lrok:/lrno: (shaky vision read awaiting the driver's confirmation)
+    if (deps.docs && owner && (await handleLrReadConfirm(deps.docs, m, session, owner))) return;
 
     const [verb, attemptId, priceStr] = m.replyId.split(":");
 
@@ -111,6 +113,11 @@ export async function handleDriverMessage(
   }
 
   const text = m.kind === "text" ? (m.text ?? "") : (m.replyTitle ?? "");
+
+  // ---- typed answer while a shaky LR read awaits confirmation ----
+  if (session?.state === "CONFIRM_LR_READ" && deps.docs && owner) {
+    if (await handleLrReadConfirm(deps.docs, m, session, owner)) return;
+  }
 
   // ---- we asked for the invoice amount we couldn't read off the photo ----
   if (session?.state === "AWAIT_INVOICE_AMOUNT" && deps.docs) {
@@ -169,6 +176,13 @@ export async function handleDriverMessage(
   // ---- typed LR number, no live offer to catch it first ----
   if (deps.docs && owner && (await handleTypedLr(deps.docs, text, owner, m.from))) return;
 
-  // ---- no live offer: a driver just saying hello ----
-  await say(`Namaste! We'll message you here when a load matches your route. — ${deps.config.companyName}`);
+  // ---- no live offer: walk the driver through everything they can do here ----
+  await say(
+    `Namaste 🙏 Main ${deps.config.companyName} ka saathi hoon. We'll message you here when a load matches your route.\n\n` +
+      `Aap yahan ye sab kar sakte hain:\n` +
+      `📄 *LR / bilty ka status* — LR ki photo bhejein (ya number type karein, jaise PIN-ABC123) → main bataunga payment hua ya nahi\n` +
+      `🧾 *Invoice bhejein* — bhade ke bill ki photo bhejein → main amount check karke team ko dunga\n` +
+      `🚛 *Naya load* — load milte hi offer yahin aayega, buttons se jawab dein\n\n` +
+      `📸 Photo tip: poora page dikhe, roshni achhi ho, seedha angle.`,
+  );
 }

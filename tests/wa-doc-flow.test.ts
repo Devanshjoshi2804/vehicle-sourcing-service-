@@ -12,7 +12,7 @@ import { VisionClient, VisionDoc } from "../src/wa/vision.js";
 import { WaInbound } from "../src/wa/inbound.js";
 import { Owner } from "../src/owners/owners.schema.js";
 import {
-  DocFlowDeps, handleDriverMedia, handleTypedLr, handleInvoiceConfirm, normalizeLrNumber, looksLikeLrNumber,
+  DocFlowDeps, handleDriverMedia, handleTypedLr, handleInvoiceConfirm, handleLrReadConfirm, normalizeLrNumber, looksLikeLrNumber,
 } from "../src/wa/doc-flow.js";
 
 const testConfig = () =>
@@ -307,7 +307,7 @@ describe("doc-flow: LR branch", () => {
     // same shape arriving via a photo (media foreign-create path).
     const handled = await handleTypedLr(d, "16ft", s.owner, phone);
     expect(handled).toBe(true);
-    expect(sent[0].args[0]).toBe("LR 16FT not found — our team will check.");
+    expect(sent[0].args[0]).toContain("LR 16FT not found — our team will check.");
     expect(await s.lrs.getByNumber("16FT")).toBeNull();
 
     const after = (await pool.query(`SELECT count(*)::int AS n FROM loads`)).rows[0].n;
@@ -531,5 +531,46 @@ describe("doc-flow: invoice branch", () => {
     const allDocs = await s.docs.listByLoad(s.load.id);
     const invoiceDocs = allDocs.filter((d) => d.kind === "invoice");
     expect(invoiceDocs).toHaveLength(1);
+  });
+});
+
+describe("shaky vision reads (confidence 0.5–0.7)", () => {
+  it("asks the driver to confirm the number before acting; Sahi hai proceeds to status", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({ ok: true, doc: { docType: "lr", lrNumber: "PIN-4K7KQ2", confidence: 0.6 } }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "sh1"), s.owner);
+    const btns = sent.filter((x) => x.kind === "buttons");
+    expect(btns).toHaveLength(1);
+    expect(btns[0].args[1].map((b: any) => b.id.split(":")[0])).toEqual(["lrok", "lrno"]);
+    const session = await s.sessions.get(digits(s.owner.phone));
+    expect(session!.state).toBe("CONFIRM_LR_READ");
+    const handled = await handleLrReadConfirm(d, replyMsg(s.owner.phone, "sh2", "lrok:PIN-4K7KQ2"), session, s.owner);
+    expect(handled).toBe(true);
+    const texts = sent.filter((x) => x.kind === "text").map((x) => String(x.args[0]));
+    expect(texts.some((t) => /PIN-4K7KQ2.*UNPAID/s.test(t))).toBe(true);
+  });
+
+  it("Galat hai clears and coaches; typed corrected number then resolves", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const { client, sent } = fakeInterakt();
+    const d = depsFor(s, fakeVision({ ok: true, doc: { docType: "lr", lrNumber: "PIN-4K7KQ9", confidence: 0.55 } }), client);
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "sh3"), s.owner);
+    let session = await s.sessions.get(digits(s.owner.phone));
+    await handleLrReadConfirm(d, replyMsg(s.owner.phone, "sh4", "lrno:x"), session, s.owner);
+    let texts = sent.filter((x) => x.kind === "text").map((x) => String(x.args[0]));
+    expect(texts.some((t) => /type kar dein/i.test(t))).toBe(true);
+    expect((await s.sessions.get(digits(s.owner.phone)))!.state).toBe("IDLE");
+    // re-arm and answer with a TYPED corrected number
+    await handleDriverMedia(d, mediaMsg(s.owner.phone, "sh5"), s.owner);
+    session = await s.sessions.get(digits(s.owner.phone));
+    const handled = await handleLrReadConfirm(
+      d, { from: digits(s.owner.phone), msgId: "sh6", contactName: "R", kind: "text", text: "PIN-4K7KQ2" }, session, s.owner,
+    );
+    expect(handled).toBe(true);
+    texts = sent.filter((x) => x.kind === "text").map((x) => String(x.args[0]));
+    expect(texts.some((t) => /PIN-4K7KQ2.*UNPAID/s.test(t))).toBe(true);
   });
 });
