@@ -216,3 +216,25 @@ describe("document pipeline wiring", () => {
     expect(sent[2].args[0]).toMatch(/matches the agreed freight/);
   });
 });
+
+describe("accept on a load already locked to the same driver", () => {
+  it("tells the winner it's already theirs, not 'filled by another driver'", async () => {
+    const { pool } = await withTestDb();
+    const { deps, sent, load, attempt, owner } = await setup(pool);
+    // dispatcher pre-locked the load to THIS driver via the console (demand path)
+    const { DemandRepo } = await import("../src/demand/demand.repo.js");
+    const demand = new DemandRepo(pool);
+    const { demand: d } = await demand.upsertByConversation({
+      customerPhone: "+919888800001", fromText: "Mumbai", toText: "Pune", vehicleType: "16ft",
+      offeredPriceInr: 13000, pickupDate: "2026-07-15", elConversationId: "prelock_1", channel: "whatsapp",
+    } as any);
+    await demand.attachLoad(d.id, load.id);
+    await demand.setStatus(d.id, "SOURCING");
+    await demand.lockDriver(load.id, owner.id, 15000);
+    // driver taps Accept AFTER the lock
+    await handleDriverMessage(deps as any, msg("919111111155", { kind: "reply", replyId: `acc:${attempt.id}:15000` }) as any, null);
+    const texts = sent.filter((s) => s.kind === "text").map((s) => String(s.args[0]));
+    expect(texts.some((t) => /already yours/.test(t))).toBe(true);
+    expect(texts.some((t) => /another driver/.test(t))).toBe(false);
+  });
+});

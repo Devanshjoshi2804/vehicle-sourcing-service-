@@ -52,6 +52,10 @@ export function buildWaSender(deps: {
           [route(load), load.vehicleType, load.pickupDate, String(priceInr)],
           Object.fromEntries(buttons.map((b, i) => [String(i), [b.id]])),
         );
+        // The approved template's button texts are STATIC ("Accept", not
+        // "Accept ₹15,000") — store those titles so Interakt's title-only
+        // button-click events resolve back to our ids.
+        buttons[0] = { id: buttons[0].id, title: "Accept" };
       }
       await deps.callsRepo.setConversationId(attempt.id, `wa_${attempt.id}`);
       await deps.callsRepo.setStatus(attempt.id, "IN_PROGRESS");

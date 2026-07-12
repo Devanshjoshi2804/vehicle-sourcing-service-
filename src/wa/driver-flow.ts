@@ -37,11 +37,20 @@ export async function handleDriverMessage(
     });
     await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
     await deps.sessions.clear(m.from);
-    await say(
-      r.ok && r.locked
-        ? `🎉 The load is yours${price ? ` at ${inr(price)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`
-        : `Sorry — this load was just filled by another driver. Next time! 🙏`,
-    );
+    if (r.ok && r.locked) {
+      return say(`🎉 The load is yours${price ? ` at ${inr(price)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`);
+    }
+    // Not locked by THIS tap — but the lock may already be theirs (dispatcher
+    // accepted them on the console, or a double-tap). Never tell the winner
+    // someone else got it.
+    if (r.ok && r.loadId) {
+      const demand = await deps.availability.demandRepo.findByLoadId(r.loadId);
+      if (demand?.winningOwnerId && demand.winningOwnerId === r.ownerId) {
+        const held = demand.lockedPriceInr;
+        return say(`🎉 This load is already yours${held ? ` at ${inr(held)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`);
+      }
+    }
+    await say(`Sorry — this load was just filled by another driver. Next time! 🙏`);
   }
 
   async function counter(attemptId: string, price: number) {
