@@ -1,5 +1,5 @@
 import { Truck, CalendarDays } from "lucide-react";
-import { Load } from "../api/client";
+import { Load, Lr } from "../api/client";
 import { inr } from "../lib/format";
 import { RouteLine } from "./RouteLine";
 import { Stamp } from "./Stamp";
@@ -30,11 +30,15 @@ export function LoadDocket({
   run,
   locked,
   lockedPrice,
+  lr,
+  disputed,
 }: {
   load: Load;
   run: Run;
   locked: boolean;
   lockedPrice?: number | null;
+  lr?: Lr | null;
+  disputed?: boolean;
 }) {
   const calling = load.status === "CALLING";
   const booked = load.status === "BOOKED";
@@ -121,8 +125,31 @@ export function LoadDocket({
           tone="text-go"
           go={!!run.winner}
         />
+        {lr && (
+          <>
+            <Sep />
+            <Flag label={`LR ${lr.status}`} tone={lr.status === "PAID" ? "go" : "amber"} />
+          </>
+        )}
+        {disputed && (
+          <>
+            <Sep />
+            <Flag label="🧾 DISPUTED" tone="rose" />
+          </>
+        )}
       </div>
     </section>
+  );
+}
+
+function Flag({ label, tone }: { label: string; tone: "go" | "amber" | "rose" }) {
+  const dot: Record<string, string> = { go: "bg-go", amber: "bg-amber", rose: "bg-rose" };
+  const text: Record<string, string> = { go: "text-go", amber: "text-amber", rose: "text-rose" };
+  return (
+    <span className="flex items-center gap-2">
+      <span className={`h-1.5 w-1.5 rounded-full ${dot[tone]}`} />
+      <span className={`font-mono text-[10px] font-700 uppercase tracking-[0.14em] ${text[tone]}`}>{label}</span>
+    </span>
   );
 }
 

@@ -143,6 +143,34 @@ export type DemandRequest = {
   createdAt: string;
 };
 
+export type Lr = {
+  id: string;
+  lrNumber: string;
+  loadId: string | null;
+  ownerId: string | null;
+  status: "UNPAID" | "PAID";
+  paidAt: string | null;
+  source: "system" | "driver_upload";
+  needsReview: boolean;
+  note: string | null;
+  createdAt: string;
+};
+export type DriverDoc = {
+  id: string;
+  ownerId: string | null;
+  phone: string;
+  loadId: string | null;
+  lrId: string | null;
+  kind: "lr" | "invoice" | "other" | "unprocessed";
+  mediaUrl: string;
+  extracted: Record<string, unknown>;
+  billedInr: number | null;
+  varianceInr: number | null;
+  dispute: "NONE" | "DISPUTED" | "RESOLVED";
+  createdAt: string;
+};
+export type LoadDocs = { lr: Lr | null; docs: DriverDoc[] };
+
 export const api = {
   // owners
   listOwners: () => req<Owner[]>("GET", "/owners"),
@@ -189,4 +217,9 @@ export const api = {
   cancelDemand: (id: string) => req<{ status: string }>("POST", `/demand/${id}/cancel`),
   resourceDemand: (id: string) =>
     req<{ loadId: string; calledOwners: number; status: string }>("POST", `/demand/${id}/resource`),
+  // lr / doc intake
+  loadDocs: (id: string) => req<LoadDocs>("GET", `/loads/${id}/docs`),
+  lrsNeedingReview: () => req<Lr[]>("GET", "/lrs?needsReview=true"),
+  markLrPaid: (id: string) => req<{ status: "PAID"; paidAt: string }>("POST", `/lrs/${id}/mark-paid`),
+  resolveDispute: (id: string) => req<{ dispute: "RESOLVED" }>("POST", `/docs/${id}/resolve-dispute`),
 };

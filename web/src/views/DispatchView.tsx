@@ -8,6 +8,7 @@ import { LoadDocket, Run } from "../components/LoadDocket";
 import { TheLane } from "../components/TheLane";
 import { TheLine, resolveOutcome } from "../components/TheLine";
 import { RouteLine } from "../components/RouteLine";
+import { DocsPanel } from "../components/DocsPanel";
 
 function todayPlus(days: number) {
   const d = new Date();
@@ -132,6 +133,17 @@ export function DispatchView() {
     !!selId,
   );
   const demand = demandList?.[0] ?? null;
+
+  // LR + driver-submitted docs (invoices, photos) for the selected load.
+  const { data: docsData, refresh: refreshDocs } = usePolling(
+    () => (selId ? api.loadDocs(selId) : Promise.resolve({ lr: null, docs: [] })),
+    5000,
+    [selId],
+    !!selId,
+  );
+  const lr = docsData?.lr ?? null;
+  const docs = docsData?.docs ?? [];
+  const disputed = docs.some((d) => d.dispute === "DISPUTED");
 
   const calledOwnerIds = useMemo(() => new Set((calls ?? []).map((c) => c.ownerId)), [calls]);
   const ownerById = useMemo(() => new Map((owners ?? []).map((o) => [o.id, o])), [owners]);
@@ -264,7 +276,14 @@ export function DispatchView() {
           </Panel>
         ) : (
           <>
-            <LoadDocket load={selected} run={run} locked={locked} lockedPrice={demand?.lockedPriceInr ?? null} />
+            <LoadDocket
+              load={selected}
+              run={run}
+              locked={locked}
+              lockedPrice={demand?.lockedPriceInr ?? null}
+              lr={lr}
+              disputed={disputed}
+            />
             <div className="grid min-h-[440px] grid-cols-1 gap-5 xl:grid-cols-[minmax(290px,380px)_1fr]">
               <TheLane load={selected} calledOwnerIds={calledOwnerIds} onFired={refreshCalls} />
               <TheLine
@@ -280,6 +299,7 @@ export function DispatchView() {
                 onClose={closeLoad}
               />
             </div>
+            {(lr || docs.length > 0) && <DocsPanel lr={lr} docs={docs} onChange={refreshDocs} />}
           </>
         )}
       </div>
