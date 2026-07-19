@@ -20,7 +20,7 @@ async function setup(pool: any) {
     availability: { quotesRepo: quotes, callsRepo: calls, loadsRepo: loads, demandRepo: demand },
     callsRepo: calls, loadsRepo: loads, demandRepo: demand,
   };
-  return { actionDeps, demand, calls, owner, load, attempt };
+  return { actionDeps, demand, calls, owner, load, attempt, loads };
 }
 
 describe("acceptAttempt core", () => {
@@ -40,5 +40,49 @@ describe("acceptAttempt core", () => {
 
     expect(outcome).toEqual({ kind: "already_yours", priceInr: 15000 });
     expect((await calls.getById(attempt.id))!.status).toBe("DONE");
+  });
+});
+
+describe("declineBooking core", () => {
+  it("on CUSTOMER_PENDING: returns 'declined' and closes the load", async () => {
+    const { pool } = await withTestDb();
+    const { actionDeps, demand, loads, owner, load, attempt } = await setup(pool);
+    const { demand: d } = await demand.upsertByConversation({
+      customerPhone: "+919888800002", fromText: "Mumbai", toText: "Pune", vehicleType: "16ft",
+      offeredPriceInr: 13000, pickupDate: "2026-07-15", elConversationId: "decline_core_1", channel: "whatsapp",
+    } as any);
+    await demand.attachLoad(d.id, load.id);
+    await demand.setStatus(d.id, "SOURCING");
+    await demand.lockDriver(load.id, owner.id, 15000);
+    await demand.approveValue(d.id); // -> CUSTOMER_PENDING
+
+    const { declineBooking } = await import("../src/calls/actions.js");
+    const result = await declineBooking(actionDeps, d.id);
+
+    expect(result).toBe("declined");
+    expect((await demand.getById(d.id))!.status).toBe("DECLINED");
+    expect((await loads.getLoad(load.id))!.status).toBe("CLOSED");
+  });
+
+  it("on BOOKED: returns 'not_pending' and leaves both untouched", async () => {
+    const { pool } = await withTestDb();
+    const { actionDeps, demand, loads, owner, load, attempt } = await setup(pool);
+    const { demand: d } = await demand.upsertByConversation({
+      customerPhone: "+919888800002", fromText: "Mumbai", toText: "Pune", vehicleType: "16ft",
+      offeredPriceInr: 13000, pickupDate: "2026-07-15", elConversationId: "decline_core_2", channel: "whatsapp",
+    } as any);
+    await demand.attachLoad(d.id, load.id);
+    await demand.setStatus(d.id, "SOURCING");
+    await demand.lockDriver(load.id, owner.id, 15000);
+    await demand.approveValue(d.id);
+    await demand.book(d.id); // -> BOOKED
+    await loads.setStatus(load.id, "BOOKED"); // also set load to BOOKED
+
+    const { declineBooking } = await import("../src/calls/actions.js");
+    const result = await declineBooking(actionDeps, d.id);
+
+    expect(result).toBe("not_pending");
+    expect((await demand.getById(d.id))!.status).toBe("BOOKED");
+    expect((await loads.getLoad(load.id))!.status).toBe("BOOKED");
   });
 });

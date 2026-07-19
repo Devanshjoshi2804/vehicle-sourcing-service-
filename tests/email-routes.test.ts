@@ -115,6 +115,32 @@ describe("/e/:action magic-link routes", () => {
     expect((await loads.getLoad(load.id))!.status).toBe("CLOSED");
   });
 
+  it("nbk re-click after /e/bok books says already handled, demand stays BOOKED", async () => {
+    const { pool } = await withTestDb();
+    const app = buildServer({ pool, config });
+    const { demand, loads, load, demandId, attempt } = await seedLockable(pool);
+
+    // Book the demand via /e/bok
+    const acc = signAction(config.webhookSecret, { a: "acc", id: attempt.id, p: 15000 });
+    await app.inject({ method: "GET", url: `/e/acc?t=${acc}` });
+    await demand.approveValue(demandId);
+
+    const bokToken = signAction(config.webhookSecret, { a: "bok", id: demandId });
+    const res = await app.inject({ method: "GET", url: `/e/bok?t=${bokToken}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("🎉 Trip booked!");
+    expect((await demand.getById(demandId))!.status).toBe("BOOKED");
+    expect((await loads.getLoad(load.id))!.status).toBe("BOOKED");
+
+    // Try to decline via /e/nbk: should be idempotent, say already handled
+    const nbkToken = signAction(config.webhookSecret, { a: "nbk", id: demandId });
+    const res2 = await app.inject({ method: "GET", url: `/e/nbk?t=${nbkToken}` });
+    expect(res2.statusCode).toBe(200);
+    expect(res2.body).toContain("Already handled");
+    expect((await demand.getById(demandId))!.status).toBe("BOOKED");
+    expect((await loads.getLoad(load.id))!.status).toBe("BOOKED");
+  });
+
   it("rejects a forged token with a 400 expired page", async () => {
     const { pool } = await withTestDb();
     const app = buildServer({ pool, config });

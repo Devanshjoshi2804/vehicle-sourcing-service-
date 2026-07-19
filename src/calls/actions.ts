@@ -66,8 +66,9 @@ export async function bookDemand(deps: ActionDeps, demandId: string): Promise<"b
   return "booked";
 }
 
-export async function declineBooking(deps: ActionDeps, demandId: string): Promise<void> {
-  const d = await deps.demandRepo.getById(demandId);
-  await deps.demandRepo.setStatus(demandId, "DECLINED");
-  if (d?.loadId) await deps.loadsRepo.setStatus(d.loadId, "CLOSED");
+export async function declineBooking(deps: ActionDeps, demandId: string): Promise<"declined" | "not_pending"> {
+  const d = await deps.demandRepo.declinePending(demandId);
+  if (!d) return "not_pending";
+  if (d.loadId) await deps.loadsRepo.setStatus(d.loadId, "CLOSED");
+  return "declined";
 }

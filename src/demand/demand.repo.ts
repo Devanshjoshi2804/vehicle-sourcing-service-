@@ -221,4 +221,14 @@ export class DemandRepo {
     );
     return rows[0] ? rowToDemand(rows[0]) : null;
   }
+
+  // Customer declines → the trip is declined. Race-safe: only succeeds if status is CUSTOMER_PENDING.
+  async declinePending(id: string): Promise<DemandRequest | null> {
+    const { rows } = await this.pool.query(
+      `UPDATE demand_requests SET status='DECLINED'
+       WHERE id=$1 AND status='CUSTOMER_PENDING' RETURNING *`,
+      [id],
+    );
+    return rows[0] ? rowToDemand(rows[0]) : null;
+  }
 }

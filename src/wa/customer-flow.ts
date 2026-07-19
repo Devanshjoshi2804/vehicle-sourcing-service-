@@ -128,9 +128,9 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
           return;
         }
         if (d && verb === "dec") {
-          await declineBooking(actionDeps, d.id);
+          const outcome = await declineBooking(actionDeps, d.id);
           await deps.sessions.clear(m.from);
-          await say("No problem — the booking is cancelled. Message us anytime for a new load.");
+          await say(outcome === "declined" ? "No problem — the booking is cancelled. Message us anytime for a new load." : "This booking is no longer pending.");
           return;
         }
       } catch {

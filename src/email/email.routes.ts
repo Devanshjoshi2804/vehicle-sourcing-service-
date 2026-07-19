@@ -50,8 +50,10 @@ export function registerEmailRoutes(
       }
       return reply.send(page("🎉 Trip booked!"));
     }
-    // nbk
-    await declineBooking(deps.actions, token.id);
-    return reply.send(page("Booking declined"));
+    if (action === "nbk") {
+      const result = await declineBooking(deps.actions, token.id);
+      if (result === "not_pending") return reply.send(page("Already handled"));
+      return reply.send(page("Booking declined"));
+    }
   });
 }
