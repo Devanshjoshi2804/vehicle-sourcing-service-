@@ -103,6 +103,15 @@ describe("driver document intake (media)", () => {
           },
         };
       },
+      async extractFromBuffer() {
+        return {
+          ok: true,
+          doc: {
+            docType: "other", lrNumber: null, billedTotalInr: null, vehicleNo: null,
+            from: null, to: null, docDate: null, paidStampSeen: false, confidence: 0.9,
+          },
+        };
+      },
     };
     const app = buildServer({
       pool, config, interakt: client, vision: stubVision,
@@ -134,6 +143,15 @@ describe("driver document intake (media)", () => {
     const { client, sent } = fakeInterakt();
     const stubVision: VisionClient = {
       async extract() {
+        return {
+          ok: true,
+          doc: {
+            docType: "other", lrNumber: null, billedTotalInr: null, vehicleNo: null,
+            from: null, to: null, docDate: null, paidStampSeen: false, confidence: 0.9,
+          },
+        };
+      },
+      async extractFromBuffer() {
         return {
           ok: true,
           doc: {

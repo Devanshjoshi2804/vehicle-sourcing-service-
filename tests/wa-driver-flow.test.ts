@@ -20,7 +20,10 @@ function fakeVision(result: { ok: true; doc: Partial<VisionDoc> } | { ok: false;
     docDate: null, paidStampSeen: false, confidence: 0.9,
     ...(result.ok ? result.doc : {}),
   };
-  return { async extract() { return result.ok ? { ok: true, doc } : result; } };
+  return {
+    async extract() { return result.ok ? { ok: true, doc } : result; },
+    async extractFromBuffer() { return result.ok ? { ok: true, doc } : result; },
+  };
 }
 
 const config = loadConfig({

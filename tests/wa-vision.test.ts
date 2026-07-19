@@ -140,4 +140,23 @@ describe("vision client", () => {
     const result = await client.extract(MEDIA_URL);
     expect(result).toEqual({ ok: false, reason: "extract_failed" });
   });
+
+  it("extractFromBuffer: extracts via Gemini given raw bytes + mime, no media fetch", async () => {
+    const f = makeFetch({ geminiText: JSON.stringify(FULL_RAW_DOC) });
+    const client = buildVisionClient(loadConfig({ ...baseEnv, GEMINI_API_KEY: "g" } as any), f);
+    const result = await client.extractFromBuffer(Buffer.from([1, 2, 3, 4]), "image/jpeg");
+    expect(result).toEqual({ ok: true, doc: EXPECTED_DOC });
+    expect(f).toHaveBeenCalledTimes(1); // only the Gemini call — no media fetch for a buffer entry
+  });
+
+  it("extractFromBuffer: returns too_large for an oversized buffer without calling any provider", async () => {
+    const f = makeFetch();
+    const client = buildVisionClient(
+      loadConfig({ ...baseEnv, GEMINI_API_KEY: "g", DOC_MAX_BYTES: "3" } as any),
+      f
+    );
+    const result = await client.extractFromBuffer(Buffer.from([1, 2, 3, 4]), "image/jpeg");
+    expect(result).toEqual({ ok: false, reason: "too_large" });
+    expect(f).not.toHaveBeenCalled();
+  });
 });

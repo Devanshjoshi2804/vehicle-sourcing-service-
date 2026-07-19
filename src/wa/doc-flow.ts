@@ -455,6 +455,94 @@ export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: 
   await say(reply);
 }
 
+// Buffer/email entry point: same OCR'd-doc branching as handleDriverMedia,
+// minus anything that needs an interactive WA button. Email has no buttons to
+// tap, so the two button-driven sub-flows collapse to a plain typed-number
+// ask: marginal-confidence LR reads (0.5–0.7) skip CONFIRM_LR_READ and go
+// straight to UNREADABLE ("type the LR number"); an invoice with no directly
+// resolvable LR ref skips the guess/confirm-trip prompt and goes straight to
+// NO_TRIP (same ask, invoice-flavored copy) instead of parking a
+// WA-only session. driver_docs.media_url = sourceRef (e.g.
+// `email:<messageId>/<filename>`), phone = owner.phone (docs/notes just need
+// an owner identifier, not a reply address).
+export async function handleDriverDocBuffer(
+  deps: DocFlowDeps, owner: Owner, replyFn: (text: string) => Promise<void>,
+  buffer: Buffer, mime: string, sourceRef: string,
+): Promise<void> {
+  const phone = owner.phone;
+
+  const storeUnprocessed = (kind: DriverDoc["kind"] = "unprocessed", extracted: Record<string, unknown> = {}) =>
+    deps.docsRepo.upsert({ ownerId: owner.id, phone, kind, mediaUrl: sourceRef, extracted });
+
+  const result = await deps.vision.extractFromBuffer(buffer, mime);
+  if (!result.ok) {
+    await storeUnprocessed();
+    await replyFn(result.reason === "too_large" ? TOO_LARGE : UNREADABLE);
+    return;
+  }
+
+  const doc = result.doc;
+  if (doc.confidence < 0.5) {
+    await storeUnprocessed("unprocessed", doc as unknown as Record<string, unknown>);
+    await replyFn(UNREADABLE);
+    return;
+  }
+
+  if (doc.docType === "other") {
+    await storeUnprocessed("other", doc as unknown as Record<string, unknown>);
+    await replyFn(NON_FREIGHT);
+    return;
+  }
+
+  if (doc.docType === "invoice") {
+    const extracted = doc as unknown as Record<string, unknown>;
+    const lr = doc.lrNumber ? await deps.lrsRepo.getByNumber(normalizeLrNumber(doc.lrNumber)) : null;
+    const load = lr?.loadId && (!lr.ownerId || lr.ownerId === owner.id) ? await deps.loadsRepo.getLoad(lr.loadId) : null;
+    if (!load) {
+      // ponytail: no interactive guess-confirm for buffer entries — ask the
+      // driver to type the LR number instead of the WA button flow.
+      await deps.docsRepo.upsert({ ownerId: owner.id, phone, kind: "invoice", mediaUrl: sourceRef, extracted, billedInr: doc.billedTotalInr });
+      await replyFn(NO_TRIP);
+      return;
+    }
+    const demand = await deps.demandRepo.findByLoadId(load.id);
+    const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
+    const cmp = compareInvoice(doc.billedTotalInr, agreed);
+    await deps.docsRepo.upsert({
+      ownerId: owner.id, phone, loadId: load.id, lrId: lr!.id, kind: "invoice", mediaUrl: sourceRef, extracted,
+      billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute,
+    });
+    await replyFn(cmp.reply);
+    return;
+  }
+
+  // docType === "lr"
+  if (!doc.lrNumber) {
+    await storeUnprocessed("unprocessed", doc as unknown as Record<string, unknown>);
+    await replyFn(UNREADABLE);
+    return;
+  }
+
+  if (doc.confidence < 0.7) {
+    // ponytail: shaky read — WA asks via CONFIRM_LR_READ buttons; buffer
+    // entries have none, so just ask the driver to type the number.
+    await storeUnprocessed("unprocessed", doc as unknown as Record<string, unknown>);
+    await replyFn(UNREADABLE);
+    return;
+  }
+
+  const { reply, lr } = await resolveLr(deps, doc.lrNumber, owner, phone, {
+    billedTotalInr: doc.billedTotalInr, vehicleNo: doc.vehicleNo, from: doc.from, to: doc.to,
+    docDate: doc.docDate, paidStampSeen: doc.paidStampSeen,
+  }, { allowCreate: true });
+  await deps.docsRepo.upsert({
+    ownerId: owner.id, phone, loadId: lr?.loadId ?? null, lrId: lr?.id ?? null,
+    kind: "lr", mediaUrl: sourceRef, extracted: doc as unknown as Record<string, unknown>,
+    billedInr: doc.billedTotalInr ?? null, dispute: "NONE",
+  });
+  await replyFn(reply);
+}
+
 // Driver-flow calls this while a CONFIRM_LR_READ session is live (shaky vision
 // read awaiting the driver's confirmation). Handles button taps AND typed
 // haan/nahi/corrected-number; false = not ours, caller falls through. Media

@@ -12,7 +12,7 @@ import { VisionClient, VisionDoc } from "../src/wa/vision.js";
 import { WaInbound } from "../src/wa/inbound.js";
 import { Owner } from "../src/owners/owners.schema.js";
 import {
-  DocFlowDeps, handleDriverMedia, handleTypedLr, handleInvoiceConfirm, handleLrReadConfirm, normalizeLrNumber, looksLikeLrNumber,
+  DocFlowDeps, handleDriverMedia, handleDriverDocBuffer, handleTypedLr, handleInvoiceConfirm, handleLrReadConfirm, normalizeLrNumber, looksLikeLrNumber,
 } from "../src/wa/doc-flow.js";
 
 const testConfig = () =>
@@ -31,7 +31,10 @@ function fakeVision(result: { ok: true; doc: Partial<VisionDoc> } | { ok: false;
     docDate: null, paidStampSeen: false, confidence: 0.9,
     ...(result.ok ? result.doc : {}),
   };
-  return { async extract() { return result.ok ? { ok: true, doc } : result; } };
+  return {
+    async extract() { return result.ok ? { ok: true, doc } : result; },
+    async extractFromBuffer() { return result.ok ? { ok: true, doc } : result; },
+  };
 }
 
 async function seed(pool: any) {
@@ -572,5 +575,28 @@ describe("shaky vision reads (confidence 0.5–0.7)", () => {
     expect(handled).toBe(true);
     texts = sent.filter((x) => x.kind === "text").map((x) => String(x.args[0]));
     expect(texts.some((t) => /PIN-4K7KQ2.*UNPAID/s.test(t))).toBe(true);
+  });
+});
+
+describe("doc-flow: handleDriverDocBuffer (email/attachment entry)", () => {
+  it("ours+mine UNPAID → LR status reply via replyFn, doc row upserted with media_url = sourceRef", async () => {
+    const { pool } = await withTestDb();
+    const s = await seed(pool);
+    const d: DocFlowDeps = {
+      vision: fakeVision({ ok: true, doc: { lrNumber: "PIN-4K7KQ2" } }),
+      lrsRepo: s.lrs, docsRepo: s.docs, loadsRepo: s.loads, demandRepo: s.demand,
+      interakt: fakeInterakt().client, sessions: s.sessions, config: testConfig(),
+    };
+    const replies: string[] = [];
+    const sourceRef = "email:msg-1/lr.jpg";
+    await handleDriverDocBuffer(
+      d, s.owner, async (t) => { replies.push(t); }, Buffer.from([1, 2, 3, 4]), "image/jpeg", sourceRef,
+    );
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/PIN-4K7KQ2.*UNPAID/s);
+    const rows = await s.docs.listByLoad(s.load.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("lr");
+    expect(rows[0].mediaUrl).toBe(sourceRef);
   });
 });
