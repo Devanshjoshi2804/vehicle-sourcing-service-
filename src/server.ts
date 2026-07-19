@@ -164,7 +164,7 @@ export function buildServer(deps: {
       sessions: waSessions,
       ownersRepo,
       driver: { availability, interakt, sessions: waSessions, callsRepo, loadsRepo, config: deps.config, docs },
-      customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config, mint },
+      customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, availability, callsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config, mint },
     });
   }
   return app;

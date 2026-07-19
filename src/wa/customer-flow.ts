@@ -9,6 +9,9 @@ import { ParsedLoad } from "./llm-parse.js";
 import { inr } from "./wa-sender.js";
 import { parseIntent, parsePriceText } from "./intent.js";
 import { mintLr, MintDeps } from "../lr/mint.js";
+import { AvailabilityDeps } from "../quotes/availability.js";
+import { CallsRepo } from "../calls/calls.repo.js";
+import { ActionDeps, bookDemand, declineBooking } from "../calls/actions.js";
 
 export type CustomerFlowDeps = {
   capture: CaptureDeps;
@@ -16,6 +19,8 @@ export type CustomerFlowDeps = {
   sessions: WaSessionsRepo;
   demandRepo: DemandRepo;
   loadsRepo: LoadsRepo;
+  availability: AvailabilityDeps;
+  callsRepo: CallsRepo;
   parseLoad: (text: string, today: string) => Promise<ParsedLoad>;
   config: Config;
   mint?: MintDeps;
@@ -80,6 +85,9 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
   const say = (t: string) => deps.interakt.sendText(m.from, t);
   const draft: Draft = { ...((session?.ctx?.draft as Draft) ?? {}) };
   const state = session?.state ?? "IDLE";
+  const actionDeps: ActionDeps = {
+    availability: deps.availability, callsRepo: deps.callsRepo, loadsRepo: deps.loadsRepo, demandRepo: deps.demandRepo,
+  };
 
   // Customers dump full sentences mid-flow ("16ft mumbai to pune 17000 tomorrow").
   // Parse anything sentence-like and MERGE what it yields into the draft — never
@@ -113,18 +121,14 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: WaInbound
         const [, verb, demandId] = idMatch;
         const d = await deps.demandRepo.getById(demandId);
         if (d && verb === "bok") {
-          const booked = await deps.demandRepo.book(d.id);
-          if (booked && d.loadId) {
-            await deps.loadsRepo.setStatus(d.loadId, "BOOKED");
-            if (deps.mint) await mintLr(deps.mint, d.loadId);
-          }
+          const outcome = await bookDemand(actionDeps, d.id);
+          if (outcome === "booked" && d.loadId && deps.mint) await mintLr(deps.mint, d.loadId);
           await deps.sessions.clear(m.from);
-          await say(booked ? "🎉 Booked! The driver will call you before pickup." : "This booking is no longer pending.");
+          await say(outcome === "booked" ? "🎉 Booked! The driver will call you before pickup." : "This booking is no longer pending.");
           return;
         }
         if (d && verb === "dec") {
-          await deps.demandRepo.setStatus(d.id, "DECLINED");
-          if (d.loadId) await deps.loadsRepo.setStatus(d.loadId, "CLOSED");
+          await declineBooking(actionDeps, d.id);
           await deps.sessions.clear(m.from);
           await say("No problem — the booking is cancelled. Message us anytime for a new load.");
           return;

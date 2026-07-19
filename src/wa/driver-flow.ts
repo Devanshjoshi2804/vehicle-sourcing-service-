@@ -2,9 +2,10 @@ import { Config } from "../config.js";
 import { WaInbound } from "./inbound.js";
 import { WaSession, WaSessionsRepo } from "./wa-sessions.repo.js";
 import { InteraktClient } from "./interakt.client.js";
-import { recordAvailability, AvailabilityDeps } from "../quotes/availability.js";
+import { AvailabilityDeps } from "../quotes/availability.js";
 import { CallsRepo, CallAttempt } from "../calls/calls.repo.js";
 import { LoadsRepo } from "../loads/loads.repo.js";
+import { ActionDeps, acceptAttempt, counterAttempt, declineAttempt } from "../calls/actions.js";
 import { inr } from "./wa-sender.js";
 import { parseIntent, parsePriceText } from "./intent.js";
 import { Owner } from "../owners/owners.schema.js";
@@ -26,38 +27,27 @@ export async function handleDriverMessage(
   deps: DriverFlowDeps, m: WaInbound, session: WaSession | null, owner?: Owner | null,
 ): Promise<void> {
   const say = (t: string) => deps.interakt.sendText(m.from, t);
+  const actionDeps: ActionDeps = {
+    availability: deps.availability, callsRepo: deps.callsRepo, loadsRepo: deps.loadsRepo,
+    demandRepo: deps.availability.demandRepo,
+  };
 
   // ---- the three actions, shared by button taps and typed answers ----
 
   async function accept(attemptId: string, price: number | null) {
-    // allowUpdate: a driver who countered first can still accept — the stored
-    // quote upgrades to accepts_fixed and the (idempotent) lock runs.
-    const r = await recordAvailability(deps.availability, {
-      cid: `wa_${attemptId}`, available: "YES", acceptsFixed: true, lockPriceInr: price, allowUpdate: true,
-    });
-    await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
+    const outcome = await acceptAttempt(actionDeps, attemptId, price);
     await deps.sessions.clear(m.from);
-    if (r.ok && r.locked) {
-      return say(`🎉 The load is yours${price ? ` at ${inr(price)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`);
+    if (outcome.kind === "locked") {
+      return say(`🎉 The load is yours${outcome.priceInr ? ` at ${inr(outcome.priceInr)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`);
     }
-    // Not locked by THIS tap — but the lock may already be theirs (dispatcher
-    // accepted them on the console, or a double-tap). Never tell the winner
-    // someone else got it.
-    if (r.ok && r.loadId) {
-      const demand = await deps.availability.demandRepo.findByLoadId(r.loadId);
-      if (demand?.winningOwnerId && demand.winningOwnerId === r.ownerId) {
-        const held = demand.lockedPriceInr;
-        return say(`🎉 This load is already yours${held ? ` at ${inr(held)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`);
-      }
+    if (outcome.kind === "already_yours") {
+      return say(`🎉 This load is already yours${outcome.priceInr ? ` at ${inr(outcome.priceInr)}` : ""}. ${deps.config.companyName} will confirm pickup details shortly.`);
     }
     await say(`Sorry — this load was just filled by another driver. Next time! 🙏`);
   }
 
   async function counter(attemptId: string, price: number) {
-    const r = await recordAvailability(deps.availability, {
-      cid: `wa_${attemptId}`, available: "YES", acceptsFixed: false, quotedPriceInr: price, allowUpdate: true,
-    });
-    await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
+    const r = await counterAttempt(actionDeps, attemptId, price);
     await deps.sessions.clear(m.from);
     await say(
       r.ok
@@ -67,8 +57,7 @@ export async function handleDriverMessage(
   }
 
   async function decline(attemptId: string) {
-    await recordAvailability(deps.availability, { cid: `wa_${attemptId}`, available: "NO", allowUpdate: true });
-    await deps.callsRepo.setStatus(attemptId, "DONE", { ended: true });
+    await declineAttempt(actionDeps, attemptId);
     await deps.sessions.clear(m.from);
     await say(`No problem — we'll keep you posted on the next load. 🙏`);
   }
