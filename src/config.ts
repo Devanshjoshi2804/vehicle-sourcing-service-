@@ -57,6 +57,27 @@ const schema = z.object({
   MISTRAL_MODEL: z.string().default("pixtral-12b-2409"),
   LR_CREATE_DAILY_CAP: z.coerce.number().default(5),
   DOC_MAX_BYTES: z.coerce.number().default(8_388_608),
+  // Email channel (IMAP poll + SMTP send). Enabled iff IMAP creds are present
+  // AND EMAIL_ENABLED isn't explicitly turned off — same pattern as WA_ENABLED.
+  EMAIL_ENABLED: z
+    .enum(["true", "false", "1", "0"])
+    .default("true")
+    .transform((v) => v === "true" || v === "1"),
+  IMAP_HOST: z.string().default("imap.gmail.com"),
+  IMAP_PORT: z.coerce.number().default(993),
+  IMAP_USER: z.string().optional(),
+  IMAP_PASSWORD: z.string().optional(),
+  SMTP_HOST: z.string().default("smtp.gmail.com"),
+  SMTP_PORT: z.coerce.number().default(465),
+  SMTP_SECURE: z
+    .enum(["true", "false", "1", "0"])
+    .default("true")
+    .transform((v) => v === "true" || v === "1"),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  EMAIL_POLL_SECONDS: z.coerce.number().default(30),
+  EMAIL_REPLY_TTL_MIN: z.coerce.number().default(120),
 });
 
 export type Config = {
@@ -95,6 +116,19 @@ export type Config = {
   mistralModel: string;
   lrCreateDailyCap: number;
   docMaxBytes: number;
+  emailEnabled: boolean;
+  imapHost: string;
+  imapPort: number;
+  imapUser?: string;
+  imapPassword?: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpFrom?: string;
+  emailPollSeconds: number;
+  emailReplyTtlMin: number;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -135,5 +169,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     mistralModel: p.MISTRAL_MODEL,
     lrCreateDailyCap: p.LR_CREATE_DAILY_CAP,
     docMaxBytes: p.DOC_MAX_BYTES,
+    emailEnabled: Boolean(p.IMAP_USER) && Boolean(p.IMAP_PASSWORD) && p.EMAIL_ENABLED,
+    imapHost: p.IMAP_HOST,
+    imapPort: p.IMAP_PORT,
+    imapUser: p.IMAP_USER,
+    imapPassword: p.IMAP_PASSWORD,
+    smtpHost: p.SMTP_HOST,
+    smtpPort: p.SMTP_PORT,
+    smtpSecure: p.SMTP_SECURE,
+    smtpUser: p.SMTP_USER,
+    smtpPass: p.SMTP_PASS,
+    smtpFrom: p.SMTP_FROM,
+    emailPollSeconds: p.EMAIL_POLL_SECONDS,
+    emailReplyTtlMin: p.EMAIL_REPLY_TTL_MIN,
   };
 }

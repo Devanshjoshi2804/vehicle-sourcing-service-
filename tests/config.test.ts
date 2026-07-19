@@ -68,4 +68,40 @@ describe("loadConfig", () => {
     expect(cfg.lrCreateDailyCap).toBe(5);
     expect(cfg.docMaxBytes).toBe(8388608);
   });
+
+  it("parses email config with defaults when IMAP creds are present", () => {
+    const cfg = loadConfig({
+      DATABASE_URL: "postgres://x", API_KEY: "k", WEBHOOK_SECRET: "w",
+      PUBLIC_BASE_URL: "https://h", ELEVENLABS_API_KEY: "el",
+      ELEVENLABS_AGENT_SOURCING: "a", ELEVENLABS_SIP_PHONE_ID: "p",
+      IMAP_USER: "u@gmail.com", IMAP_PASSWORD: "app-pass",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.imapHost).toBe("imap.gmail.com");
+    expect(cfg.imapPort).toBe(993);
+    expect(cfg.smtpHost).toBe("smtp.gmail.com");
+    expect(cfg.smtpPort).toBe(465);
+    expect(cfg.smtpSecure).toBe(true);
+    expect(cfg.emailPollSeconds).toBe(30);
+    expect(cfg.emailReplyTtlMin).toBe(120);
+    expect(cfg.emailEnabled).toBe(true);
+  });
+
+  it("EMAIL_ENABLED=false disables email even with IMAP creds", () => {
+    const cfg = loadConfig({
+      DATABASE_URL: "postgres://x", API_KEY: "k", WEBHOOK_SECRET: "w",
+      PUBLIC_BASE_URL: "https://h", ELEVENLABS_API_KEY: "el",
+      ELEVENLABS_AGENT_SOURCING: "a", ELEVENLABS_SIP_PHONE_ID: "p",
+      IMAP_USER: "u@gmail.com", IMAP_PASSWORD: "app-pass", EMAIL_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.emailEnabled).toBe(false);
+  });
+
+  it("emailEnabled is false without IMAP creds", () => {
+    const cfg = loadConfig({
+      DATABASE_URL: "postgres://x", API_KEY: "k", WEBHOOK_SECRET: "w",
+      PUBLIC_BASE_URL: "https://h", ELEVENLABS_API_KEY: "el",
+      ELEVENLABS_AGENT_SOURCING: "a", ELEVENLABS_SIP_PHONE_ID: "p",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.emailEnabled).toBe(false);
+  });
 });
