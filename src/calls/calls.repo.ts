@@ -114,6 +114,18 @@ export class CallsRepo {
     return rows[0] ? rowToCall(rows[0]) : null;
   }
 
+  // The owner's newest live attempt on a given channel — lets email replies that
+  // don't carry a subject tag act on the right attempt (mirrors findLiveWaByPhone).
+  async findLiveByOwner(ownerId: string, channel: CallChannel): Promise<CallAttempt | null> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM call_attempts
+       WHERE owner_id=$1 AND channel=$2 AND status = ANY($3)
+       ORDER BY created_at DESC LIMIT 1`,
+      [ownerId, channel, LIVE_STATUSES],
+    );
+    return rows[0] ? rowToCall(rows[0]) : null;
+  }
+
   // First-accept-wins: once one driver locks the load, stop dialing everyone else
   // on it. Marks every other live call SUPERSEDED and returns how many.
   async supersedePending(loadId: string, exceptOwnerId: string): Promise<number> {

@@ -8,6 +8,7 @@ import { Load } from "../loads/loads.schema.js";
 import { Owner } from "../owners/owners.schema.js";
 import { buildDynamicVars } from "./dynamic-vars.js";
 import { WaSender } from "../wa/wa-sender.js";
+import { EmailSender } from "../email/email-sender.js";
 
 type Deps = {
   pool: pg.Pool;
@@ -17,6 +18,7 @@ type Deps = {
   loadsRepo: LoadsRepo;
   callsRepo: CallsRepo;
   waSender?: WaSender;
+  emailSender?: EmailSender;
 };
 
 export class CallOrchestrator {
@@ -37,13 +39,16 @@ export class CallOrchestrator {
     for (const ownerId of ownerIds) {
       const owner = byId.get(ownerId);
       if (!owner) continue;
-      const wantsWa = !!this.d.waSender && owner.channel !== "voice";
+      // channel "email" is its own preference — it never falls back to WA, only
+      // to voice (same as a whatsapp/both owner falls to voice with no waSender).
+      const wantsEmail = owner.channel === "email" && !!this.d.emailSender;
+      const wantsWa = !wantsEmail && owner.channel !== "voice" && owner.channel !== "email" && !!this.d.waSender;
       const attempt = await this.d.callsRepo.create({
         loadId,
         ownerId,
         phone: owner.phone,
         flow,
-        channel: wantsWa ? "wa" : "voice",
+        channel: wantsEmail ? "email" : wantsWa ? "wa" : "voice",
       });
       attempts.push(attempt);
     }
@@ -103,6 +108,18 @@ export class CallOrchestrator {
       try {
         const priceInr = offerPriceInr ?? load.fixedPriceInr;
         await this.d.waSender.sendOffer(a, load, owner, priceInr, flow);
+        return;
+      } catch {
+        await this.d.callsRepo.setChannel(a.id, "voice");
+        a = { ...a, channel: "voice" };
+      }
+    }
+    // Email owners get the same shape: a send failure (bad address, SMTP down)
+    // falls back to voice instead of silently never contacting the driver.
+    if (a.channel === "email" && this.d.emailSender) {
+      try {
+        const priceInr = offerPriceInr ?? load.fixedPriceInr;
+        await this.d.emailSender.sendOffer(a, load, owner, priceInr, flow);
         return;
       } catch {
         await this.d.callsRepo.setChannel(a.id, "voice");

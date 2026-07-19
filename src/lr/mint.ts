@@ -4,6 +4,7 @@ import { LoadsRepo } from "../loads/loads.repo.js";
 import { DemandRepo } from "../demand/demand.repo.js";
 import { OwnersRepo } from "../owners/owners.repo.js";
 import { WaSender, inr } from "../wa/wa-sender.js";
+import { Mailer } from "../email/mailer.js";
 
 // No O, no I — visually ambiguous with 0 and 1 on a printed/photographed LR.
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
@@ -20,6 +21,7 @@ export type MintDeps = {
   demandRepo: DemandRepo;
   ownersRepo: OwnersRepo;
   waSender?: WaSender;
+  mailer?: Mailer;
 };
 
 // Mints the system LR right after a load is BOOKED. Idempotent — a re-book
@@ -46,16 +48,18 @@ export async function mintLr(deps: MintDeps, loadId: string): Promise<Lr | null>
       lr = await deps.lrsRepo.create({ lrNumber: genLrNumber(), loadId, ownerId }); // one retry on collision
     }
 
-    if (deps.waSender && ownerId) {
+    if (ownerId && (deps.waSender || deps.mailer)) {
       try {
         const owners = await deps.ownersRepo.getActiveOwners();
         const owner = owners.find((o) => o.id === ownerId);
-        if (owner && owner.channel !== "voice") {
+        if (owner) {
           const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
-          await deps.waSender.sendText(
-            owner.phone,
-            `📄 Your LR: ${lr.lrNumber} — ${load.fromLocation} → ${load.toLocation} · ${inr(agreed)}. Send a photo of any LR or invoice here anytime.`,
-          );
+          const body = `📄 Your LR: ${lr.lrNumber} — ${load.fromLocation} → ${load.toLocation} · ${inr(agreed)}. Send a photo of any LR or invoice here anytime.`;
+          if (owner.channel === "email" && owner.email && deps.mailer) {
+            await deps.mailer.send(owner.email, `LR ${lr.lrNumber}`, body);
+          } else if (deps.waSender && owner.channel !== "voice") {
+            await deps.waSender.sendText(owner.phone, body);
+          }
         }
       } catch {
         /* best-effort — a notify failure must never break booking */

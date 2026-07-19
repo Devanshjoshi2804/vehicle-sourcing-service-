@@ -9,6 +9,7 @@ export function startCallWatchdog(
   opts: {
     staleMinutes: number;
     waStaleMinutes: number;
+    emailStaleMinutes: number;
     intervalMs?: number;
     log?: (msg: string) => void;
   },
@@ -20,7 +21,8 @@ export function startCallWatchdog(
     try {
       const expired = await callsRepo.expireStale(staleMs, "voice");
       const expiredWa = await callsRepo.expireStale(opts.waStaleMinutes * 60_000, "wa");
-      const n = expired.length + expiredWa.length;
+      const expiredEmail = await callsRepo.expireStale(opts.emailStaleMinutes * 60_000, "email");
+      const n = expired.length + expiredWa.length + expiredEmail.length;
       if (n) opts.log?.(`watchdog: closed ${n} stale attempt(s)`);
     } catch (e) {
       opts.log?.(`watchdog error: ${e instanceof Error ? e.message : e}`);

@@ -9,6 +9,7 @@ const app = buildServer({ pool, config: cfg });
 startCallWatchdog(pool, {
   staleMinutes: cfg.callStaleMinutes,
   waStaleMinutes: cfg.waReplyTtlMin,
+  emailStaleMinutes: cfg.emailReplyTtlMin,
   log: (m) => app.log.info(m),
 });
 app.listen({ port: cfg.port, host: "0.0.0.0" }).catch((err) => {

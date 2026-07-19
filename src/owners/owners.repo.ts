@@ -11,6 +11,7 @@ function rowToOwner(r: any): Owner {
     active: r.active,
     createdAt: r.created_at.toISOString(),
     channel: r.channel,
+    email: r.email ?? null,
   };
 }
 
@@ -19,9 +20,9 @@ export class OwnersRepo {
 
   async createOwner(i: OwnerInput): Promise<Owner> {
     const { rows } = await this.pool.query(
-      `INSERT INTO owners(name, phone, vehicle_types, lanes, channel)
-       VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING *`,
-      [i.name, i.phone, i.vehicleTypes, JSON.stringify(i.lanes), i.channel ?? "voice"],
+      `INSERT INTO owners(name, phone, vehicle_types, lanes, channel, email)
+       VALUES ($1,$2,$3,$4::jsonb,$5,$6) RETURNING *`,
+      [i.name, i.phone, i.vehicleTypes, JSON.stringify(i.lanes), i.channel ?? "voice", i.email ?? null],
     );
     return rowToOwner(rows[0]);
   }
@@ -47,7 +48,8 @@ export class OwnersRepo {
          vehicle_types = COALESCE($4, vehicle_types),
          lanes = COALESCE($5::jsonb, lanes),
          active = COALESCE($6, active),
-         channel = COALESCE($7, channel)
+         channel = COALESCE($7, channel),
+         email = COALESCE($8, email)
        WHERE id = $1 RETURNING *`,
       [
         id,
@@ -57,6 +59,7 @@ export class OwnersRepo {
         patch.lanes ? JSON.stringify(patch.lanes) : null,
         patch.active ?? null,
         patch.channel ?? null,
+        patch.email ?? null,
       ],
     );
     return rows[0] ? rowToOwner(rows[0]) : null;

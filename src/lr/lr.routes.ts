@@ -5,6 +5,7 @@ import { LoadsRepo } from "../loads/loads.repo.js";
 import { DemandRepo } from "../demand/demand.repo.js";
 import { OwnersRepo } from "../owners/owners.repo.js";
 import { WaSender, inr } from "../wa/wa-sender.js";
+import { Mailer } from "../email/mailer.js";
 
 export function registerLrRoutes(
   app: FastifyInstance,
@@ -15,6 +16,7 @@ export function registerLrRoutes(
     demandRepo: DemandRepo;
     ownersRepo: OwnersRepo;
     waSender?: WaSender;
+    mailer?: Mailer;
   },
   preHandler: any,
 ) {
@@ -36,15 +38,20 @@ export function registerLrRoutes(
 
     // best-effort: never let a notify failure undo the payment mark
     try {
-      if (deps.waSender && paid.ownerId && paid.loadId) {
+      if ((deps.waSender || deps.mailer) && paid.ownerId && paid.loadId) {
         const owners = await deps.ownersRepo.getActiveOwners();
         const owner = owners.find((o) => o.id === paid.ownerId);
-        if (owner && owner.channel !== "voice") {
+        if (owner) {
           const load = await deps.loadsRepo.getLoad(paid.loadId);
           if (load) {
             const demand = await deps.demandRepo.findByLoadId(paid.loadId);
             const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
-            await deps.waSender.sendText(owner.phone, `💰 Payment released for LR ${paid.lrNumber} (${inr(agreed)}).`);
+            const body = `💰 Payment released for LR ${paid.lrNumber} (${inr(agreed)}).`;
+            if (owner.channel === "email" && owner.email && deps.mailer) {
+              await deps.mailer.send(owner.email, `Payment released — LR ${paid.lrNumber}`, body);
+            } else if (deps.waSender && owner.channel !== "voice") {
+              await deps.waSender.sendText(owner.phone, body);
+            }
           }
         }
       }

@@ -32,6 +32,8 @@ import { registerLrRoutes } from "./lr/lr.routes.js";
 import { buildVisionClient, VisionClient } from "./wa/vision.js";
 import { ActionDeps } from "./calls/actions.js";
 import { registerEmailRoutes } from "./email/email.routes.js";
+import { buildMailer, Mailer } from "./email/mailer.js";
+import { buildEmailSender } from "./email/email-sender.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
@@ -40,6 +42,7 @@ export function buildServer(deps: {
   geo?: GeoResolver;
   interakt?: InteraktClient;
   vision?: VisionClient;
+  mailer?: Mailer;
 }): FastifyInstance {
   const app = Fastify({ logger: true });
   // Interakt signs /wa/inbound with an HMAC of the RAW body; the JSON content-type
@@ -118,6 +121,10 @@ export function buildServer(deps: {
   const waSender = interakt
     ? buildWaSender({ interakt, callsRepo, sessions: waSessions, config: deps.config })
     : undefined;
+  const mailer =
+    deps.mailer ??
+    (deps.config.smtpUser && deps.config.smtpPass ? buildMailer(deps.config) : undefined);
+  const emailSender = mailer ? buildEmailSender({ mailer, callsRepo, config: deps.config }) : undefined;
   const orchestrator = new CallOrchestrator({
     pool: deps.pool,
     config: deps.config,
@@ -126,6 +133,7 @@ export function buildServer(deps: {
     loadsRepo,
     callsRepo,
     waSender,
+    emailSender,
   });
 
   const quotesRepo = new QuotesRepo(deps.pool);
@@ -133,7 +141,7 @@ export function buildServer(deps: {
   const geo = deps.geo ?? buildGeoResolver(deps.config);
   const lrsRepo = new LrsRepo(deps.pool);
   const docsRepo = new DocsRepo(deps.pool);
-  const mint: MintDeps = { lrsRepo, loadsRepo, demandRepo, ownersRepo, waSender };
+  const mint: MintDeps = { lrsRepo, loadsRepo, demandRepo, ownersRepo, waSender, mailer };
   // Always built — buildVisionClient's no_provider path (no gemini/mistral key)
   // makes no network calls, it just returns ok:false so docs still get stored
   // unprocessed for manual review instead of the pipeline silently not running.
@@ -145,7 +153,7 @@ export function buildServer(deps: {
   registerCallRoutes(app, orchestrator, callsRepo, preHandler);
   registerQuoteRoutes(app, { quotesRepo, orchestrator }, preHandler);
   registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, waSender, mint }, preHandler);
-  registerLrRoutes(app, { lrsRepo, docsRepo, loadsRepo, demandRepo, ownersRepo, waSender }, preHandler);
+  registerLrRoutes(app, { lrsRepo, docsRepo, loadsRepo, demandRepo, ownersRepo, waSender, mailer }, preHandler);
   registerWebhookRoutes(app, {
     quotesRepo,
     callsRepo,
