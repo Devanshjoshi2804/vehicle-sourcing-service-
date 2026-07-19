@@ -12,7 +12,7 @@ export type CallStatus =
   | "FAILED"
   | "SUPERSEDED";
 const LIVE_STATUSES = ["QUEUED", "DIALING", "IN_PROGRESS"] as const;
-export type CallChannel = "voice" | "wa";
+export type CallChannel = "voice" | "wa" | "email";
 export type NewCallAttempt = {
   loadId: string;
   ownerId: string;

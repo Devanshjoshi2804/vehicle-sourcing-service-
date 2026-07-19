@@ -30,6 +30,8 @@ import { DocsRepo } from "./lr/docs.repo.js";
 import { MintDeps } from "./lr/mint.js";
 import { registerLrRoutes } from "./lr/lr.routes.js";
 import { buildVisionClient, VisionClient } from "./wa/vision.js";
+import { ActionDeps } from "./calls/actions.js";
+import { registerEmailRoutes } from "./email/email.routes.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
@@ -136,6 +138,7 @@ export function buildServer(deps: {
   // makes no network calls, it just returns ok:false so docs still get stored
   // unprocessed for manual review instead of the pipeline silently not running.
   const vision = deps.vision ?? buildVisionClient(deps.config);
+  const availability = { quotesRepo, callsRepo, loadsRepo, demandRepo, orchestrator };
 
   registerOwnerRoutes(app, ownersRepo, preHandler);
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
@@ -155,8 +158,12 @@ export function buildServer(deps: {
     mint,
   });
 
+  // Magic-link routes are public (the HMAC token is the auth) and registered
+  // unconditionally — a no-op dead end when email sending is off.
+  const actions: ActionDeps = { availability, callsRepo, loadsRepo, demandRepo };
+  registerEmailRoutes(app, { config: deps.config, actions, mint });
+
   if (interakt && waSender) {
-    const availability = { quotesRepo, callsRepo, loadsRepo, demandRepo, orchestrator };
     const capture = { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, geo };
     const docs = { vision, lrsRepo, docsRepo, loadsRepo, demandRepo, interakt, sessions: waSessions, config: deps.config };
     registerWaRoutes(app, {
