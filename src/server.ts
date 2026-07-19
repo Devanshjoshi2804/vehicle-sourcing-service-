@@ -34,6 +34,8 @@ import { ActionDeps } from "./calls/actions.js";
 import { registerEmailRoutes } from "./email/email.routes.js";
 import { buildMailer, Mailer } from "./email/mailer.js";
 import { buildEmailSender } from "./email/email-sender.js";
+import { EmailSessionsRepo } from "./email/email-sessions.repo.js";
+import { buildEmailRouter } from "./email/router.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
@@ -171,8 +173,9 @@ export function buildServer(deps: {
   const actions: ActionDeps = { availability, callsRepo, loadsRepo, demandRepo };
   registerEmailRoutes(app, { config: deps.config, actions, mint });
 
+  const capture = { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, geo };
+
   if (interakt && waSender) {
-    const capture = { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, geo };
     const docs = { vision, lrsRepo, docsRepo, loadsRepo, demandRepo, interakt, sessions: waSessions, config: deps.config };
     registerWaRoutes(app, {
       config: deps.config,
@@ -182,5 +185,22 @@ export function buildServer(deps: {
       customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, availability, callsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config, mint },
     });
   }
+
+  // Email router isn't an HTTP route — main.ts's IMAP source calls
+  // emailRouter.handle(msg) directly. Decorated onto the app instance (rather
+  // than widening buildServer's return type) so tests can drive it the same
+  // way they drive HTTP routes via app.inject.
+  if (mailer) {
+    const emailSessions = new EmailSessionsRepo(deps.pool);
+    const emailDocs = { vision, lrsRepo, docsRepo, loadsRepo, demandRepo, config: deps.config };
+    const emailRouter = buildEmailRouter({
+      sessions: emailSessions,
+      ownersRepo,
+      driver: { availability, callsRepo, loadsRepo, config: deps.config, mailer, sessions: emailSessions, docs: emailDocs },
+      customer: { capture, mailer, sessions: emailSessions, demandRepo, loadsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config },
+    });
+    app.decorate("emailRouter", emailRouter);
+  }
+
   return app;
 }

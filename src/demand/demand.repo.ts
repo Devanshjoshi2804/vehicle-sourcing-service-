@@ -19,7 +19,7 @@ export type DemandStatus =
   | "DECLINED"
   | "CANCELLED";
 
-export type DemandChannel = "voice" | "whatsapp" | "console";
+export type DemandChannel = "voice" | "whatsapp" | "console" | "email";
 
 export type DemandInput = {
   customerPhone: string;

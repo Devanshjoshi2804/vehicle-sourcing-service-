@@ -75,6 +75,16 @@ export class OwnersRepo {
     return rows[0] ? rowToOwner(rows[0]) : null;
   }
 
+  // Email inbound routing: which owner (if any) sent this. Case-insensitive,
+  // active only — a deactivated driver's mail falls through to the customer flow.
+  async findByEmail(address: string): Promise<Owner | null> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM owners WHERE lower(email) = lower($1) AND active = true LIMIT 1`,
+      [address],
+    );
+    return rows[0] ? rowToOwner(rows[0]) : null;
+  }
+
   // Hard delete. Drivers with call/quote history are protected by FK constraints —
   // callers should deactivate those instead ("referenced" result).
   async deleteOwner(id: string): Promise<"deleted" | "referenced" | "missing"> {

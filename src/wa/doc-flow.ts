@@ -213,10 +213,12 @@ async function resolveLr(
 }
 
 // ---- invoice branch copy — VERBATIM per spec ----
-const NO_TRIP = `Which LR is this invoice for? Please type the LR number.
+// Exported: the email driver-flow (Task 7) reuses these sentinels/copy directly
+// instead of re-deriving English-only equivalents.
+export const NO_TRIP = `Which LR is this invoice for? Please type the LR number.
 
 🧾 Ye invoice kis trip ka hai? Uska *LR number type kar dein* (jaise PIN-ABC123) taaki main sahi trip se jod sakun.`;
-const NO_TOTAL = `Couldn't read the invoice amount — please type the amount (e.g. 16500 or 16.5k).
+export const NO_TOTAL = `Couldn't read the invoice amount — please type the amount (e.g. 16500 or 16.5k).
 
 😕 Bill ka total amount padh nahi paya — bas *amount type kar dein* (jaise 16500 ya 16.5k).`;
 const invoiceMatch = (n: number) => `🧾 Invoice received: ${inr(n)} — matches the agreed freight.
@@ -229,7 +231,7 @@ const invoiceDispute = (billed: number, agreed: number, diff: number) =>
 const guessConfirmBody = (from: string, to: string, agreed: number) =>
   `Is this invoice for ${from}→${to} · ${inr(agreed)}? `;
 
-type InvoiceCompare = {
+export type InvoiceCompare = {
   billedInr: number | null;
   varianceInr: number | null;
   dispute: DriverDoc["dispute"];
@@ -319,6 +321,25 @@ async function resolveInvoice(deps: DocFlowDeps, m: WaInbound, owner: Owner, doc
   });
 }
 
+// Core of a CONFIRM_INVOICE_TRIP "yes": link the pending doc to the guessed
+// load, score it against the agreed price, and return the compare — or null
+// when the load itself has vanished (caller falls back to NO_TRIP copy).
+// Shared by WA's handleInvoiceConfirm and the email driver-flow (Task 7), which
+// have different session/reply mechanics but the same linking logic.
+export async function confirmInvoiceTrip(deps: DocFlowDeps, docId: string, loadId: string): Promise<InvoiceCompare | null> {
+  const load = loadId ? await deps.loadsRepo.getLoad(loadId) : null;
+  if (!load) return null;
+  const [lr, demand, pendingDoc] = await Promise.all([
+    deps.lrsRepo.getByLoad(load.id),
+    deps.demandRepo.findByLoadId(load.id),
+    deps.docsRepo.getById(docId),
+  ]);
+  const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
+  const cmp = compareInvoice(pendingDoc?.billedInr ?? null, agreed);
+  await deps.docsRepo.linkInvoice(docId, { loadId: load.id, lrId: lr?.id ?? null, billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute });
+  return cmp;
+}
+
 // Driver-flow calls this on any reply while a CONFIRM_INVOICE_TRIP session is
 // live; false means the reply isn't one of ours (caller falls through).
 export async function handleInvoiceConfirm(deps: DocFlowDeps, m: WaInbound, session: WaSession | null): Promise<boolean> {
@@ -335,21 +356,13 @@ export async function handleInvoiceConfirm(deps: DocFlowDeps, m: WaInbound, sess
   }
 
   const loadId = String(session.ctx?.loadId ?? "");
-  const load = loadId ? await deps.loadsRepo.getLoad(loadId) : null;
-  if (!load) {
+  const cmp = await confirmInvoiceTrip(deps, docId, loadId);
+  if (!cmp) {
     await deps.sessions.clear(m.from);
     await deps.interakt.sendText(m.from, NO_TRIP);
     return true;
   }
-  const [lr, demand, pendingDoc] = await Promise.all([
-    deps.lrsRepo.getByLoad(load.id),
-    deps.demandRepo.findByLoadId(load.id),
-    deps.docsRepo.getById(docId),
-  ]);
-  const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
-  const cmp = compareInvoice(pendingDoc?.billedInr ?? null, agreed);
-  await deps.docsRepo.linkInvoice(docId, { loadId: load.id, lrId: lr?.id ?? null, billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute });
-  await afterInvoiceReply(deps, m.from, docId, load.id, cmp);
+  await afterInvoiceReply(deps, m.from, docId, loadId, cmp);
   return true;
 }
 
@@ -455,20 +468,31 @@ export async function handleDriverMedia(deps: DocFlowDeps, m: WaInbound, owner: 
   await say(reply);
 }
 
+// Signal from handleDriverDocBuffer telling the caller (email driver-flow) to
+// park a session: a guess/confirm-trip prompt just went out (needs a YES/NO
+// reply), or a NO_TOTAL ask just went out (needs a typed amount reply). WA's
+// equivalents use interactive sessions directly; email has no buttons, so the
+// buffer entry point hands the (docId, loadId) pair back instead of assuming a
+// WA-shaped session store.
+export type DocBufferResult =
+  | { kind: "confirm_invoice_trip"; docId: string; loadId: string }
+  | { kind: "await_invoice_amount"; docId: string; loadId: string }
+  | void;
+
 // Buffer/email entry point: same OCR'd-doc branching as handleDriverMedia,
 // minus anything that needs an interactive WA button. Email has no buttons to
-// tap, so the two button-driven sub-flows collapse to a plain typed-number
+// tap, so the two button-driven sub-flows collapse to a plain typed-answer
 // ask: marginal-confidence LR reads (0.5–0.7) skip CONFIRM_LR_READ and go
 // straight to UNREADABLE ("type the LR number"); an invoice with no directly
-// resolvable LR ref skips the guess/confirm-trip prompt and goes straight to
-// NO_TRIP (same ask, invoice-flavored copy) instead of parking a
-// WA-only session. driver_docs.media_url = sourceRef (e.g.
+// resolvable LR ref mirrors WA's guess step (latestBookedByOwner) instead of
+// jumping straight to NO_TRIP — see DocBufferResult above for how the caller
+// is told to park a session. driver_docs.media_url = sourceRef (e.g.
 // `email:<messageId>/<filename>`), phone = owner.phone (docs/notes just need
 // an owner identifier, not a reply address).
 export async function handleDriverDocBuffer(
   deps: DocFlowDeps, owner: Owner, replyFn: (text: string) => Promise<void>,
   buffer: Buffer, mime: string, sourceRef: string,
-): Promise<void> {
+): Promise<DocBufferResult> {
   const phone = owner.phone;
 
   const storeUnprocessed = (kind: DriverDoc["kind"] = "unprocessed", extracted: Record<string, unknown> = {}) =>
@@ -498,22 +522,32 @@ export async function handleDriverDocBuffer(
     const extracted = doc as unknown as Record<string, unknown>;
     const lr = doc.lrNumber ? await deps.lrsRepo.getByNumber(normalizeLrNumber(doc.lrNumber)) : null;
     const load = lr?.loadId && (!lr.ownerId || lr.ownerId === owner.id) ? await deps.loadsRepo.getLoad(lr.loadId) : null;
-    if (!load) {
-      // ponytail: no interactive guess-confirm for buffer entries — ask the
-      // driver to type the LR number instead of the WA button flow.
-      await deps.docsRepo.upsert({ ownerId: owner.id, phone, kind: "invoice", mediaUrl: sourceRef, extracted, billedInr: doc.billedTotalInr });
+    if (load) {
+      const demand = await deps.demandRepo.findByLoadId(load.id);
+      const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
+      const cmp = compareInvoice(doc.billedTotalInr, agreed);
+      const saved = await deps.docsRepo.upsert({
+        ownerId: owner.id, phone, loadId: load.id, lrId: lr!.id, kind: "invoice", mediaUrl: sourceRef, extracted,
+        billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute,
+      });
+      await replyFn(cmp.reply);
+      if (cmp.reply === NO_TOTAL) return { kind: "await_invoice_amount", docId: saved.id, loadId: load.id };
+      return;
+    }
+
+    // No directly resolvable LR ref — guess the driver's most recent BOOKED
+    // load and ask for a YES/NO confirm (mirrors WA's resolveInvoice guess
+    // step). No booked load at all → straight to NO_TRIP, same as before.
+    const pending = await deps.docsRepo.upsert({ ownerId: owner.id, phone, kind: "invoice", mediaUrl: sourceRef, extracted, billedInr: doc.billedTotalInr });
+    const guess = await deps.loadsRepo.latestBookedByOwner(owner.id);
+    if (!guess) {
       await replyFn(NO_TRIP);
       return;
     }
-    const demand = await deps.demandRepo.findByLoadId(load.id);
-    const agreed = demand?.lockedPriceInr ?? load.fixedPriceInr;
-    const cmp = compareInvoice(doc.billedTotalInr, agreed);
-    await deps.docsRepo.upsert({
-      ownerId: owner.id, phone, loadId: load.id, lrId: lr!.id, kind: "invoice", mediaUrl: sourceRef, extracted,
-      billedInr: cmp.billedInr, varianceInr: cmp.varianceInr, dispute: cmp.dispute,
-    });
-    await replyFn(cmp.reply);
-    return;
+    const guessDemand = await deps.demandRepo.findByLoadId(guess.id);
+    const agreed = guessDemand?.lockedPriceInr ?? guess.fixedPriceInr;
+    await replyFn(`${guessConfirmBody(guess.fromLocation, guess.toLocation, agreed)}Reply YES or NO.`);
+    return { kind: "confirm_invoice_trip", docId: pending.id, loadId: guess.id };
   }
 
   // docType === "lr"
