@@ -108,7 +108,9 @@ function DemandCard({ d, refresh }: { d: DemandRequest; refresh: () => void }) {
         <span>{place(d.toText, d.toResolved)}</span>
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]">
-        <span className="font-mono text-muted">{d.channel === "whatsapp" ? "💬 WhatsApp" : d.channel === "console" ? "Console" : "📞 Call"}</span>
+        <span className="font-mono text-muted">
+          {d.channel === "whatsapp" ? "💬 WhatsApp" : d.channel === "console" ? "Console" : d.channel === "email" ? "✉️ Email" : "📞 Call"}
+        </span>
         {d.vehicleType && (
           <span className="flex items-center gap-1 font-mono text-muted">
             <Truck size={11} className="text-faint" /> {d.vehicleType}

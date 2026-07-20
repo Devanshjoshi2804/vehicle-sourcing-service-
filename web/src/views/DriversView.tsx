@@ -21,7 +21,7 @@ export function DriversView() {
   const { data: owners, refresh } = usePolling(() => api.listOwners(), 8000, []);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", phone: "+91", vehicles: "16ft", lanes: "" });
+  const [form, setForm] = useState({ name: "", phone: "+91", vehicles: "16ft", lanes: "", email: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<string | null>(null);
@@ -33,6 +33,7 @@ export function DriversView() {
       phone: o.phone,
       vehicles: o.vehicleTypes.join(", "),
       lanes: o.lanes.map((l) => `${l.from} > ${l.to}`).join(", "),
+      email: o.email ?? "",
     });
     setOpen(true);
     setErr(null);
@@ -47,10 +48,11 @@ export function DriversView() {
         phone: form.phone.trim(),
         vehicleTypes: form.vehicles.split(",").map((v) => v.trim()).filter(Boolean),
         lanes: parseLanes(form.lanes),
+        email: form.email.trim() || undefined,
       };
       if (editingId) await api.updateOwner(editingId, input);
       else await api.createOwner(input);
-      setForm({ name: "", phone: "+91", vehicles: "16ft", lanes: "" });
+      setForm({ name: "", phone: "+91", vehicles: "16ft", lanes: "", email: "" });
       setOpen(false);
       setEditingId(null);
       refresh();
@@ -103,7 +105,7 @@ export function DriversView() {
             variant="primary"
             onClick={() => {
               if (open) { setOpen(false); setEditingId(null); }
-              else { setEditingId(null); setForm({ name: "", phone: "+91", vehicles: "16ft", lanes: "" }); setOpen(true); }
+              else { setEditingId(null); setForm({ name: "", phone: "+91", vehicles: "16ft", lanes: "", email: "" }); setOpen(true); }
             }}
             className="!py-2.5"
           >
@@ -119,6 +121,7 @@ export function DriversView() {
             <Field label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+9199…" />
             <Field label="Vehicle types" value={form.vehicles} onChange={(e) => setForm({ ...form, vehicles: e.target.value })} placeholder="16ft, 20ft" />
             <Field label="Lanes (from > to, …)" value={form.lanes} onChange={(e) => setForm({ ...form, lanes: e.target.value })} placeholder="Mumbai > Pune" />
+            <Field label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="driver@example.com" />
           </div>
           <div className="mt-3 flex items-center gap-3">
             <Button variant="primary" onClick={save} disabled={busy || !form.name || form.phone.length < 8}>
@@ -177,6 +180,7 @@ export function DriversView() {
                   <option value="voice">📞 Voice</option>
                   <option value="whatsapp">💬 WhatsApp</option>
                   <option value="both">📞💬 Both</option>
+                  <option value="email">✉️ Email</option>
                 </select>
                 <button
                   onClick={() => api.updateOwner(o.id, { active: !o.active }).then(refresh).catch(() => setRowErr("could not update status"))}

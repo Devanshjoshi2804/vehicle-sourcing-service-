@@ -118,8 +118,8 @@ function CallStrip({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-[14px] font-700 text-fg">{owner?.name ?? "Driver"}</span>
-            <span className="font-mono text-[12px]" title={call.channel === "wa" ? "WhatsApp" : "Call"}>
-              {call.channel === "wa" ? "💬" : "📞"}
+            <span className="font-mono text-[12px]" title={call.channel === "wa" ? "WhatsApp" : call.channel === "email" ? "Email" : "Call"}>
+              {call.channel === "wa" ? "💬" : call.channel === "email" ? "✉️" : "📞"}
             </span>
             {call.flow === "fixed_price_followup" && (
               <span className="shrink-0 font-mono text-[9px] font-600 uppercase tracking-[0.12em] text-amber">· holding</span>

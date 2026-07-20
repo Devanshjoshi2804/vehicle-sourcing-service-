@@ -79,14 +79,16 @@ export function DocsPanel({
                   {d.kind}
                   {d.billedInr != null && <span className="font-mono text-[12px] tnum text-muted">{inr(d.billedInr)}</span>}
                 </div>
-                <a
-                  href={d.mediaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-mono text-[11px] text-brand hover:underline"
-                >
-                  view
-                </a>
+                {d.mediaUrl.startsWith("http") && (
+                  <a
+                    href={d.mediaUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[11px] text-brand hover:underline"
+                  >
+                    view
+                  </a>
+                )}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">

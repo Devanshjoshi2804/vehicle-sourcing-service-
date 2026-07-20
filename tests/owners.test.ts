@@ -68,6 +68,25 @@ describe("owners routes", () => {
     expect(found!.id).toBe(o.id);
     expect(await repo.findByPhoneDigits("910000000000")).toBeNull();
   });
+
+  it("creates an owner with email, updates it, and findByEmail is case-insensitive", async () => {
+    const { pool } = await withTestDb();
+    const repo = new OwnersRepo(pool);
+    const o = await repo.createOwner({
+      name: "E",
+      phone: "+919111111200",
+      vehicleTypes: ["16ft"],
+      lanes: [],
+      email: "driver@example.com",
+    } as any);
+    expect(o.email).toBe("driver@example.com");
+    expect((await repo.findByEmail("DRIVER@EXAMPLE.COM"))!.id).toBe(o.id);
+
+    const upd = await repo.updateOwner(o.id, { email: "new@example.com" } as any);
+    expect(upd!.email).toBe("new@example.com");
+    expect(await repo.findByEmail("driver@example.com")).toBeNull();
+    expect((await repo.findByEmail("new@example.com"))!.id).toBe(o.id);
+  });
 });
 
 it("edits phone, deletes a fresh owner, refuses to delete one with history", async () => {
