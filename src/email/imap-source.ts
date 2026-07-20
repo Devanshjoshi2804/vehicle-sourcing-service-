@@ -22,6 +22,11 @@ export function buildImapSource(config: Config): EmailInbound {
       auth: { user: config.imapUser!, pass: config.imapPassword! },
       logger: false,
     });
+    // ImapFlow emits 'error' asynchronously on a socket timeout / dropped
+    // connection. With no listener Node rethrows it as an uncaught exception and
+    // kills the whole process — the poll promise's try/catch can't see it. A
+    // no-op listener keeps it contained; the next tick reconnects.
+    client.on("error", () => {});
     await client.connect();
     try {
       const lock = await client.getMailboxLock("INBOX");
