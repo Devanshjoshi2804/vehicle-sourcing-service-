@@ -109,6 +109,14 @@ export async function handleCustomerMessage(deps: CustomerFlowDeps, m: EmailMsg,
 
   // ---- fresh message: one-shot parse ----
   const p = await deps.parseLoad(text, todayIso());
+  // Cold-contact guard: this is a public inbox, so random senders (newsletters,
+  // notifications, cold outreach) land here. Only engage a first-time stranger
+  // when the email actually reads like a load (>= 2 recognizable fields).
+  // Anything less is silently ignored — no reply, no session — so we never
+  // auto-email non-customers. Once a customer is mid-flow the branches above
+  // keep replying regardless.
+  const parsedFields = [p.fromText, p.toText, p.vehicleType, p.priceInr, p.pickupDate].filter((x) => x != null).length;
+  if (parsedFields < 2) return;
   mergeParsed(draft, p);
   const missing = missingFields(draft);
   if (!missing.length) {

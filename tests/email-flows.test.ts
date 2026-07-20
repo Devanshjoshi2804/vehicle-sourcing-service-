@@ -118,13 +118,24 @@ describe("email customer flow", () => {
     expect(s.sent[s.sent.length - 1].text).toMatch(/truck/i);
   });
 
-  it("unknown sender + gibberish → walkthrough email with an example + the missing-fields list", async () => {
+  it("cold stranger whose email doesn't read like a load → silently ignored (no reply)", async () => {
     const { pool } = await withTestDb();
-    const { router, sent } = await setup(pool);
-    await router.handle(msg("nobody@example.com", { text: "asdkjfh qwoeiru random words here" }));
-    expect(sent).toHaveLength(1);
-    expect(sent[0].text).toMatch(/Tell us your load/i);
-    expect(sent[0].text).toMatch(/missing details/i);
+    const s = await setup(pool);
+    // a random newsletter: 0 recognizable load fields
+    s.setParseLoad(async () => ({ fromText: null, toText: null, vehicleType: null, priceInr: null, pickupDate: null }));
+    await s.router.handle(msg("newsletter@vercel.com", { text: "Your deployment is ready. Click here to view." }));
+    expect(s.sent).toHaveLength(0);
+    const session = await s.sessions.get("newsletter@vercel.com");
+    expect(session?.state ?? "IDLE").toBe("IDLE"); // never entered COLLECTING
+  });
+
+  it("cold stranger whose email reads like a load (>= 2 fields) → engages", async () => {
+    const { pool } = await withTestDb();
+    const s = await setup(pool);
+    s.setParseLoad(async () => ({ fromText: "Mumbai", toText: "Pune", vehicleType: null, priceInr: null, pickupDate: null }));
+    await s.router.handle(msg("realcustomer@example.com", { text: "need a truck mumbai to pune" }));
+    expect(s.sent.some((x) => /missing details/i.test(x.text))).toBe(true);
+    expect((await s.sessions.get("realcustomer@example.com"))!.state).toBe("COLLECTING");
   });
 });
 
@@ -263,11 +274,12 @@ describe("router hygiene", () => {
 
   it("a redelivered messageId is deduped — processed only once", async () => {
     const { pool } = await withTestDb();
-    const { router, sent } = await setup(pool);
-    const fixed = msg("dup@example.com", { messageId: "<same@x.com>", text: "asdkjfh gibberish" });
-    await router.handle(fixed);
-    await router.handle(fixed);
-    expect(sent).toHaveLength(1);
+    const s = await setup(pool);
+    s.setParseLoad(async () => ({ fromText: "Mumbai", toText: "Pune", vehicleType: null, priceInr: null, pickupDate: null }));
+    const fixed = msg("dup@example.com", { messageId: "<same@x.com>", text: "mumbai to pune truck" });
+    await s.router.handle(fixed);
+    await s.router.handle(fixed);
+    expect(s.sent).toHaveLength(1);
   });
 
   it("a message from our own configured smtpUser address is dropped as a self-loop — no session, no reply", async () => {
