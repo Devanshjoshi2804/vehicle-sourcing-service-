@@ -154,6 +154,31 @@ title, a tap resolves to the driver's latest offer (see `src/wa/inbound.ts`).
 `INTERAKT_API_KEY` + `INTERAKT_WEBHOOK_SECRET` in `.env`, submit the two
 templates for approval.
 
+### Email channel
+
+**IMAP poll + SMTP send** — owners can receive offers and confirmation links over email. The system polls the mailbox every `EMAIL_POLL_SECONDS`, routes inbound mail by sender email (owner = driver, else customer), and feeds both into the same **demand/doc-flow pipeline** as voice and WhatsApp.
+
+Responses arrive in three forms:
+- **Magic links** — `GET /e/:action?token=<hmac>` (ACCEPT, DECLINE, CONFIRM, etc.) expire after `EMAIL_REPLY_TTL_MIN`.
+- **Reply-text intent** — e.g., "YES" or "NO" in the email body (recorded as a ponytail choice; subject tags `[PIN-…]`, `[LOAD-…]`, `[ATT-…]`, `[DMD-…]` thread replies to the correct load).
+- **Attachments** — LR/invoice photos flow into the same vision-extraction + doc-flow pipeline as WhatsApp.
+
+Outbound notifications for **offers, confirmations, and mark-paid** go to owners configured with email channel. The sender's email address is set via `SMTP_FROM` (e.g., `"Pinified <noreply@example.com>"`).
+
+**Setup:**
+1. Enable IMAP in Gmail Settings → Forwarding and POP/IMAP.
+2. Create an **app password** (Gmail Account → Security → App passwords) for the email account.
+3. Set `.env`:
+   ```
+   EMAIL_ENABLED=true
+   IMAP_USER=<email@gmail.com>
+   IMAP_PASSWORD=<app-password>
+   SMTP_USER=<email@gmail.com>
+   SMTP_PASS=<app-password>
+   SMTP_FROM="Pinified <email@gmail.com>"
+   ```
+4. Add owners with `channel: "email"` (or `"both"` for email + voice fallback).
+
 ### Driver documents
 
 Drivers send **LR (lorry receipt) or invoice photos** to the WhatsApp bot for status checks and invoice reconciliation. The system classifies each photo (LR, invoice, or other), matches it to the driver's trip, and returns payment status or flags invoice discrepancies for review.
