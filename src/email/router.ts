@@ -43,7 +43,9 @@ export function buildEmailRouter(deps: EmailRouterDeps): { handle(msg: EmailMsg)
         const owner = await deps.ownersRepo.findByEmail(m.from);
         await deps.sessions.upsert({ address: m.from, role: owner ? "driver" : "customer", state: "IDLE" });
       }
-      if (!(await deps.sessions.markProcessed(m.from, m.messageId))) return; // duplicate delivery
+      // dedupe by Message-ID, but only when the header was actually present —
+      // an empty id would collide two distinct header-less mails into one.
+      if (m.messageId && !(await deps.sessions.markProcessed(m.from, m.messageId))) return;
 
       const session = await deps.sessions.get(m.from);
       const owner = await deps.ownersRepo.findByEmail(m.from);
