@@ -154,7 +154,7 @@ export function buildServer(deps: {
   registerLoadRoutes(app, loadsRepo, ownersRepo, preHandler);
   registerCallRoutes(app, orchestrator, callsRepo, preHandler);
   registerQuoteRoutes(app, { quotesRepo, orchestrator }, preHandler);
-  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, waSender, mint }, preHandler);
+  registerDemandRoutes(app, { demandRepo, loadsRepo, ownersRepo, callsRepo, orchestrator, waSender, emailSender, mint }, preHandler);
   registerLrRoutes(app, { lrsRepo, docsRepo, loadsRepo, demandRepo, ownersRepo, waSender, mailer }, preHandler);
   registerWebhookRoutes(app, {
     quotesRepo,
@@ -198,6 +198,7 @@ export function buildServer(deps: {
       ownersRepo,
       driver: { availability, callsRepo, loadsRepo, config: deps.config, mailer, sessions: emailSessions, docs: emailDocs },
       customer: { capture, mailer, sessions: emailSessions, demandRepo, loadsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config },
+      config: deps.config,
     });
     app.decorate("emailRouter", emailRouter);
   }

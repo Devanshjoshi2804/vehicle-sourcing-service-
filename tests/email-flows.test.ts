@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { withTestDb } from "./helpers/db.js";
 import { loadConfig } from "../src/config.js";
+import { buildServer } from "../src/server.js";
 import { OwnersRepo } from "../src/owners/owners.repo.js";
 import { LoadsRepo } from "../src/loads/loads.repo.js";
 import { CallsRepo } from "../src/calls/calls.repo.js";
@@ -21,6 +22,7 @@ const config = loadConfig({
   PUBLIC_BASE_URL: "https://h", ELEVENLABS_API_KEY: "el", ELEVENLABS_AGENT_SOURCING: "a",
   ELEVENLABS_SIP_PHONE_ID: "p", MAX_CONCURRENT: "2", MAX_ATTEMPTS: "1",
 } as NodeJS.ProcessEnv);
+const auth = { authorization: "Bearer k" };
 
 const fakeGeo = {
   async resolveLocation(text: string) {
@@ -71,6 +73,7 @@ async function setup(pool: any, vision?: VisionClient) {
       capture, mailer, sessions, demandRepo: demand, loadsRepo: loads, config,
       parseLoad: (t, today) => parseLoad(t, today),
     },
+    config,
   });
   return {
     router, mailer, sent, owners, loads, calls, quotes, demand, sessions, lrs, docs,
@@ -265,5 +268,71 @@ describe("router hygiene", () => {
     await router.handle(fixed);
     await router.handle(fixed);
     expect(sent).toHaveLength(1);
+  });
+
+  it("a message from our own configured smtpUser address is dropped as a self-loop — no session, no reply", async () => {
+    const { pool } = await withTestDb();
+    const selfConfig = loadConfig({
+      DATABASE_URL: process.env.DATABASE_URL_TEST!, API_KEY: "k", WEBHOOK_SECRET: "w",
+      PUBLIC_BASE_URL: "https://h", ELEVENLABS_API_KEY: "el", ELEVENLABS_AGENT_SOURCING: "a",
+      ELEVENLABS_SIP_PHONE_ID: "p", MAX_CONCURRENT: "2", MAX_ATTEMPTS: "1",
+      SMTP_USER: "shared@ourbox.com",
+    } as NodeJS.ProcessEnv);
+    const owners = new OwnersRepo(pool);
+    const sessions = new EmailSessionsRepo(pool);
+    const { mailer, sent } = fakeMailer();
+    // driver/customer deps are never touched if the guard fires first — leaving
+    // them empty makes the test fail loudly (throw) if the guard regresses.
+    const router = buildEmailRouter({
+      sessions,
+      ownersRepo: owners,
+      driver: {} as any,
+      customer: {} as any,
+      config: selfConfig,
+    });
+
+    await router.handle(msg("shared@ourbox.com", { text: "BCC of our own outbound offer" }));
+
+    expect(sent).toHaveLength(0);
+    expect(await sessions.get("shared@ourbox.com")).toBeNull();
+  });
+});
+
+describe("approve-driver: email-channel customer confirm", () => {
+  it("an email-channel demand at DRIVER_LOCKED gets a Confirm booking email on approve-driver, no voice call placed", async () => {
+    const { pool } = await withTestDb();
+    const { mailer, sent } = fakeMailer();
+    const placed: any[] = [];
+    const el = { originateCall: async (a: any) => { placed.push(a); return { conversationId: `c${placed.length}` }; } };
+    const app = buildServer({ pool, config, el: el as any, mailer });
+
+    const ownersRepo = new OwnersRepo(pool);
+    const loadsRepo = new LoadsRepo(pool);
+    const demandRepo = new DemandRepo(pool);
+
+    const owner = await ownersRepo.createOwner({
+      name: "Driver E", phone: "+919111100055", vehicleTypes: ["16ft"], lanes: [],
+      channel: "email", email: "driver3@example.com",
+    } as any);
+    const load = await loadsRepo.createLoad({
+      fromLocation: "Mumbai", toLocation: "Pune", vehicleType: "16ft",
+      pickupDate: "2026-07-05", fixedPriceInr: 13000, createdBy: "t",
+    });
+
+    const { demand } = await demandRepo.upsertByConversation({
+      customerPhone: "customer@example.com", fromText: "Mumbai", toText: "Pune",
+      elConversationId: "em_approve_test_1", channel: "email",
+    });
+    await demandRepo.setStatus(demand.id, "SOURCING");
+    await demandRepo.attachLoad(demand.id, load.id);
+    await demandRepo.lockDriver(load.id, owner.id, 13000);
+
+    const res = await app.inject({ method: "POST", url: `/demand/${demand.id}/approve-driver`, headers: auth });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: "CUSTOMER_PENDING" });
+
+    expect(placed).toHaveLength(0); // no voice call — stayed on email
+    const confirmMail = sent.find((s) => s.to === "customer@example.com" && /Confirm booking \[DMD-/.test(s.subject));
+    expect(confirmMail).toBeTruthy();
   });
 });

@@ -7,6 +7,7 @@ import { CallsRepo } from "../calls/calls.repo.js";
 import { CallOrchestrator } from "../calls/orchestrator.js";
 import { sourceDemand } from "./sourcing.js";
 import { WaSender } from "../wa/wa-sender.js";
+import type { EmailSender } from "../email/email-sender.js";
 import { mintLr, MintDeps } from "../lr/mint.js";
 
 const STATUSES = [
@@ -41,6 +42,7 @@ export function registerDemandRoutes(
     callsRepo: CallsRepo;
     orchestrator: CallOrchestrator;
     waSender?: WaSender;
+    emailSender?: EmailSender;
     mint: MintDeps;
   },
   preHandler: any,
@@ -111,6 +113,10 @@ export function registerDemandRoutes(
         const owners = await deps.ownersRepo.getActiveOwners();
         const winner = owners.find((o) => o.id === approved.winningOwnerId);
         await deps.waSender.sendConfirm(approved, load, winner?.name ?? "our driver");
+      } else if (approved.channel === "email" && deps.emailSender && load) {
+        const owners = await deps.ownersRepo.getActiveOwners();
+        const winner = owners.find((o) => o.id === approved.winningOwnerId);
+        await deps.emailSender.sendConfirm(approved, load, winner?.name ?? "our driver");
       } else {
         await deps.orchestrator.confirmCustomer(approved.loadId, approved.customerPhone, approved.id);
       }
