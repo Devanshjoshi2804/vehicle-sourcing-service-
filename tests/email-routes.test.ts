@@ -51,7 +51,7 @@ describe("/e/:action magic-link routes", () => {
     const res = await app.inject({ method: "GET", url: `/e/acc?t=${token}` });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
-    expect(res.body).toContain("✅ Load accepted");
+    expect(res.body).toContain("Load accepted");
     expect(res.body).toContain("₹15,000");
     expect((await loads.getLoad(load.id))!.status).toBe("LOCKED");
     expect((await demand.getById(demandId))!.status).toBe("DRIVER_LOCKED");
@@ -59,7 +59,7 @@ describe("/e/:action magic-link routes", () => {
     // re-click: no state change, "already yours"
     const res2 = await app.inject({ method: "GET", url: `/e/acc?t=${token}` });
     expect(res2.statusCode).toBe(200);
-    expect(res2.body).toContain("✅ Already yours");
+    expect(res2.body).toContain("Already yours");
     expect((await loads.getLoad(load.id))!.status).toBe("LOCKED");
     expect((await demand.getById(demandId))!.status).toBe("DRIVER_LOCKED");
   });
@@ -72,7 +72,7 @@ describe("/e/:action magic-link routes", () => {
     const token = signAction(config.webhookSecret, { a: "dec", id: attempt.id });
     const res = await app.inject({ method: "GET", url: `/e/dec?t=${token}` });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("👍 Marked not available");
+    expect(res.body).toContain("Marked not available");
     expect((await calls.getById(attempt.id))!.status).toBe("DONE");
   });
 
@@ -88,7 +88,7 @@ describe("/e/:action magic-link routes", () => {
     const token = signAction(config.webhookSecret, { a: "bok", id: demandId });
     const res = await app.inject({ method: "GET", url: `/e/bok?t=${token}` });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("🎉 Trip booked!");
+    expect(res.body).toContain("Trip booked");
     expect((await demand.getById(demandId))!.status).toBe("BOOKED");
 
     const lrsRepo = new LrsRepo(pool);
@@ -128,7 +128,7 @@ describe("/e/:action magic-link routes", () => {
     const bokToken = signAction(config.webhookSecret, { a: "bok", id: demandId });
     const res = await app.inject({ method: "GET", url: `/e/bok?t=${bokToken}` });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("🎉 Trip booked!");
+    expect(res.body).toContain("Trip booked");
     expect((await demand.getById(demandId))!.status).toBe("BOOKED");
     expect((await loads.getLoad(load.id))!.status).toBe("BOOKED");
 

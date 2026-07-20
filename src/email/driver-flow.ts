@@ -9,6 +9,7 @@ import { inr } from "../wa/wa-sender.js";
 import { parseIntent, parsePriceText } from "../wa/intent.js";
 import { Owner } from "../owners/owners.schema.js";
 import { Mailer } from "./mailer.js";
+import { noticeEmail } from "./templates.js";
 import { InteraktClient } from "../wa/interakt.client.js";
 import {
   DocFlowDeps,
@@ -74,7 +75,9 @@ export async function handleDriverMessage(
   deps: DriverFlowDeps, m: EmailMsg, session: EmailSession | null, owner: Owner,
 ): Promise<void> {
   const reply = async (text: string) => {
-    await deps.mailer.send(owner.email ?? m.from, replySubject(m.subject), text);
+    const subject = replySubject(m.subject);
+    const built = noticeEmail(subject, "", text); // branded HTML wrapper, plaintext fallback preserved
+    await deps.mailer.send(owner.email ?? m.from, subject, text, built.html);
   };
   const actionDeps: ActionDeps = {
     availability: deps.availability, callsRepo: deps.callsRepo, loadsRepo: deps.loadsRepo,

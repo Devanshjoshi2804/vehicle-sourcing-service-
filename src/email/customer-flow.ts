@@ -8,6 +8,7 @@ import { ParsedLoad } from "../wa/llm-parse.js";
 import { inr } from "../wa/wa-sender.js";
 import { parseIntent } from "../wa/intent.js";
 import { Mailer } from "./mailer.js";
+import { noticeEmail } from "./templates.js";
 
 export type CustomerFlowDeps = {
   capture: CaptureDeps;
@@ -55,7 +56,11 @@ const summaryFor = (d: Draft) =>
   `Reply YES to post this load, or NO to cancel.`;
 
 export async function handleCustomerMessage(deps: CustomerFlowDeps, m: EmailMsg, session: EmailSession | null): Promise<void> {
-  const reply = (text: string) => deps.mailer.send(m.from, replySubject(m.subject), text);
+  const reply = (text: string) => {
+    const subject = replySubject(m.subject);
+    const built = noticeEmail(subject, "", text); // branded HTML wrapper, plaintext fallback preserved
+    return deps.mailer.send(m.from, subject, text, built.html);
+  };
   const draft: Draft = { ...((session?.ctx?.draft as Draft) ?? {}) };
   const state = session?.state ?? "IDLE";
 
