@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
-import { Radar, Truck, PhoneIncoming, Activity } from "lucide-react";
+import { Radar, Truck, PhoneIncoming, Activity, Megaphone } from "lucide-react";
 import { api } from "./api/client";
 import { usePolling } from "./hooks/usePolling";
 import { DispatchView } from "./views/DispatchView";
 import { DriversView } from "./views/DriversView";
 import { InboundView } from "./views/InboundView";
+import { OutreachView } from "./views/OutreachView";
 
-type View = "dispatch" | "drivers" | "inbound";
+type View = "dispatch" | "drivers" | "inbound" | "outreach";
 
 const NAV: { id: View; label: string; icon: any; desc: string }[] = [
   { id: "dispatch", label: "Dispatch", icon: Radar, desc: "Post loads and work the lines" },
   { id: "drivers", label: "Drivers", icon: Truck, desc: "Vehicle roster and status" },
   { id: "inbound", label: "Inbound", icon: PhoneIncoming, desc: "Customer demand and approvals" },
+  { id: "outreach", label: "Outreach", icon: Megaphone, desc: "Campaign funnel: WhatsApp → IVR → manual" },
 ];
 
 function Clock() {
@@ -109,6 +111,7 @@ export default function App() {
           {view === "dispatch" && <DispatchView />}
           {view === "drivers" && <DriversView />}
           {view === "inbound" && <InboundView onSourced={() => setView("dispatch")} />}
+          {view === "outreach" && <OutreachView />}
         </main>
       </div>
     </div>

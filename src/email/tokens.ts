@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 
 // HMAC magic-link tokens for the /e/:action email routes: the token itself is
 // the auth (no session, no login) — sign with webhookSecret, 7-day expiry.
-export type ActionToken = { a: "acc" | "dec" | "bok" | "nbk"; id: string; p?: number; x: number };
+// "cup" is the campaign document-upload link (id = campaign contact id).
+export type ActionToken = { a: "acc" | "dec" | "bok" | "nbk" | "cup"; id: string; p?: number; x: number };
 
 const b64u = (b: Buffer) => b.toString("base64url");
 

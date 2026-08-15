@@ -11,7 +11,9 @@ export async function withTestDb() {
   const pool = getPool(testConnString());
   await runMigrations(pool);
   const reset = async () => {
-    await pool.query("TRUNCATE quotes, call_attempts, loads, owners, wa_sessions, email_sessions RESTART IDENTITY CASCADE");
+    await pool.query(
+      "TRUNCATE quotes, call_attempts, loads, owners, wa_sessions, email_sessions, campaigns, campaign_contacts, campaign_attempts, campaign_docs, campaign_events RESTART IDENTITY CASCADE",
+    );
   };
   await reset();
   return { pool, reset };

@@ -213,6 +213,54 @@ DOC_MAX_BYTES=8388608       # 8 MB media size cap
 
 Without a vision key, photos are stored unprocessed for manual review.
 
+### Campaign outreach (WhatsApp → IVR → manual)
+
+A second product on the same stack: upload a customer list and let automation
+strip it down before anyone picks up a phone. Same Postgres, same Interakt
+number, same Plivo account, same console, same Caddy — no new containers.
+
+```
+CSV upload ──▶ LEG 1 WhatsApp ──2──▶ LEG 2 IVR call ──2──▶ LEG 3 Manual queue
+               1 = send document      1 = interested        human calls, dispositions
+               (doc intake)           (stays automated)     (confirmed / closed lost)
+```
+
+Each leg reconciles: `entered = key 1 + key 2 + no answer`, and every count on
+the dashboard is a `GROUP BY` over the contact's stage (plus the recorded keypad
+digits), so the funnel can never drift from the people it describes.
+
+**Rules the schema enforces.** One record per number per campaign
+(`UNIQUE (campaign_id, phone_digits)`); leg 2 dials *exactly* the leg-1 refusals
+(one set-based `UPDATE … WHERE stage='L1_DECLINED'`); leg 3 holds only the double
+refusals. Invalid upload rows (missing name, bad number, duplicate) are stored
+and flagged, never dialed. A leg-1 send failure leaves the contact at `UPLOADED`
+so a re-fire retries it — it is never mistaken for a refusal.
+
+**Document intake, two ways.** The contact can send a photo in the WhatsApp chat
+(BSP URL → the same vision pipeline as driver LR photos) or use a magic link
+(`/c/u/<hmac-token>`) to a small upload page; bytes land in the `uploads` volume.
+Either way an unreadable document is still stored for a human to look at.
+
+**Leg 2 is a DTMF menu, not a conversation** — Plivo plays the prompt and posts
+the pressed key back to `/ivr/digit`. The self-hosted voice agent is not
+involved. `/ivr/*` are public (Plivo cannot send our API key) and authenticated
+by an HMAC of the attempt id. One retry, then the contact escalates to a human.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/campaigns` | create a campaign |
+| POST | `/campaigns/:id/contacts` | upload the list (raw `text/csv` body) |
+| POST | `/campaigns/:id/fire-leg1` | WhatsApp blast to everyone still `UPLOADED` |
+| POST | `/campaigns/:id/dial-leg2` | enrol the leg-1 refusals and dial them |
+| GET | `/campaigns/:id/summary` | funnel + per-leg reconciliation |
+| GET | `/campaigns/:id/queue` | leg-3 queue, each row with its history |
+| POST | `/campaigns/contacts/:id/disposition` | `CONFIRMED` / `CLOSED_LOST` + note |
+| GET | `/campaigns/:id/export?leg=1\|2\|3\|all` | CSV download |
+
+**Setup:** approve an Interakt template with one body variable (the contact name)
+and two quick-reply buttons, set `CAMPAIGN_TEMPLATE` to its name, and make sure
+`PLIVO_CALLER_ID` is set for the IVR leg.
+
 ## Prerequisites
 
 - Node 20+

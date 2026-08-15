@@ -12,6 +12,7 @@ startCallWatchdog(pool, {
   staleMinutes: cfg.callStaleMinutes,
   waStaleMinutes: cfg.waReplyTtlMin,
   emailStaleMinutes: cfg.emailReplyTtlMin,
+  campaignIvrStaleMinutes: cfg.campaignIvrStaleMinutes,
   log: (m) => app.log.info(m),
 });
 

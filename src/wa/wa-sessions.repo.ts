@@ -1,9 +1,12 @@
 import pg from "pg";
 import { WaOption } from "./interakt.client.js";
 
+// A sender is a driver (an owner), a freight customer, or a campaign contact.
+export type WaRole = "customer" | "driver" | "campaign";
+
 export type WaSession = {
   phone: string;
-  role: "customer" | "driver";
+  role: WaRole;
   state: string;
   ctx: Record<string, unknown>;
   lastOptions: WaOption[];
@@ -24,7 +27,7 @@ export class WaSessionsRepo {
   // ctx merges (jsonb ||) so flows can add draft fields incrementally;
   // lastOptions replaces wholesale (it always reflects the latest send).
   async upsert(s: {
-    phone: string; role: "customer" | "driver"; state: string;
+    phone: string; role: WaRole; state: string;
     ctx?: Record<string, unknown>; lastOptions?: WaOption[];
   }): Promise<WaSession> {
     const { rows } = await this.pool.query(

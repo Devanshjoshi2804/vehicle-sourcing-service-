@@ -25,6 +25,10 @@ services:
     environment:
       # Override DATABASE_URL to reach the postgres service on the compose network.
       DATABASE_URL: "postgres://${PG_USER:-sourcing}:${PG_PASSWORD}@postgres:5432/${PG_DB:-vehicle_sourcing}"
+      # Campaign documents uploaded through the magic-link page land here.
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,3 +81,4 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  uploads:

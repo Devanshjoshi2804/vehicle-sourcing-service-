@@ -6,6 +6,8 @@ import { WaSessionsRepo } from "./wa-sessions.repo.js";
 import { OwnersRepo } from "../owners/owners.repo.js";
 import { handleDriverMessage, DriverFlowDeps } from "./driver-flow.js";
 import { handleCustomerMessage, CustomerFlowDeps } from "./customer-flow.js";
+import { ContactsRepo } from "../campaigns/contacts.repo.js";
+import { handleCampaignMessage, CampaignFlowDeps } from "../campaigns/campaign-flow.js";
 
 export function registerWaRoutes(
   app: FastifyInstance,
@@ -15,6 +17,9 @@ export function registerWaRoutes(
     ownersRepo: OwnersRepo;
     driver: DriverFlowDeps;
     customer: CustomerFlowDeps;
+    // Campaign outreach shares this number; absent if the module is not wired.
+    campaignContacts?: ContactsRepo;
+    campaign?: CampaignFlowDeps;
   },
 ) {
   // Interakt signs webhooks: `Interakt-Signature: sha256=` + HMAC-SHA256(rawBody).
@@ -50,6 +55,11 @@ export function registerWaRoutes(
 
         const fresh = await deps.sessions.get(m.from);
         const owner = await deps.ownersRepo.findByPhoneDigits(m.from);
+        // A number with a LIVE campaign offer is answering that offer, whatever
+        // else it is — checked first so a "1" isn't parsed as freight intake.
+        const contact = deps.campaign
+          ? await deps.campaignContacts?.findLiveByPhone(m.from)
+          : null;
 
         // Interakt delivers one button tap as TWO events (the message + a
         // button-click status) with DIFFERENT message ids, so msgId dedup can't
@@ -65,12 +75,13 @@ export function registerWaRoutes(
         // customer, and adding an owner immediately makes it a driver.
         await deps.sessions.upsert({
           phone: m.from,
-          role: owner ? "driver" : "customer",
+          role: contact ? "campaign" : owner ? "driver" : "customer",
           state: fresh?.state ?? "IDLE",
           ctx: { lastInbound: { key: actionKey, ts: Date.now() } },
         });
 
-        if (owner) await handleDriverMessage(deps.driver, m, fresh, owner);
+        if (contact && deps.campaign) await handleCampaignMessage(deps.campaign, m, contact);
+        else if (owner) await handleDriverMessage(deps.driver, m, fresh, owner);
         else await handleCustomerMessage(deps.customer, m, fresh);
       } catch (e) {
         app.log.error({ err: e }, "[wa] inbound processing failed");

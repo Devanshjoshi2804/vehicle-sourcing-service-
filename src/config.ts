@@ -78,6 +78,19 @@ const schema = z.object({
   SMTP_FROM: z.string().optional(),
   EMAIL_POLL_SECONDS: z.coerce.number().default(30),
   EMAIL_REPLY_TTL_MIN: z.coerce.number().default(120),
+  // --- Campaign outreach (CSV list → WhatsApp → IVR → manual queue) ---
+  // Approved Interakt template for the leg-1 blast: 1 body var (contact name),
+  // 2 quick-reply buttons.
+  CAMPAIGN_TEMPLATE: z.string().default("doc_verification_request"),
+  // How long a leg-1 contact may sit unanswered before it is marked no-reply
+  // (WhatsApp's template window is 24h).
+  CAMPAIGN_L1_WINDOW_MIN: z.coerce.number().default(1440),
+  // Dials per IVR contact before it escalates to the manual queue.
+  CAMPAIGN_IVR_ATTEMPTS: z.coerce.number().default(2),
+  // A dialed IVR call with no digit webhook is force-closed after this.
+  CAMPAIGN_IVR_STALE_MINUTES: z.coerce.number().default(10),
+  // Where magic-link document uploads are written (a docker volume in prod).
+  UPLOAD_DIR: z.string().default("/data/uploads"),
 });
 
 export type Config = {
@@ -129,6 +142,11 @@ export type Config = {
   smtpFrom?: string;
   emailPollSeconds: number;
   emailReplyTtlMin: number;
+  campaignTemplate: string;
+  campaignL1WindowMin: number;
+  campaignIvrAttempts: number;
+  campaignIvrStaleMinutes: number;
+  uploadDir: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -182,5 +200,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     smtpFrom: p.SMTP_FROM,
     emailPollSeconds: p.EMAIL_POLL_SECONDS,
     emailReplyTtlMin: p.EMAIL_REPLY_TTL_MIN,
+    campaignTemplate: p.CAMPAIGN_TEMPLATE,
+    campaignL1WindowMin: p.CAMPAIGN_L1_WINDOW_MIN,
+    campaignIvrAttempts: p.CAMPAIGN_IVR_ATTEMPTS,
+    campaignIvrStaleMinutes: p.CAMPAIGN_IVR_STALE_MINUTES,
+    uploadDir: p.UPLOAD_DIR,
   };
 }

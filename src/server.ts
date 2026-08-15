@@ -36,6 +36,15 @@ import { buildMailer, Mailer } from "./email/mailer.js";
 import { buildEmailSender } from "./email/email-sender.js";
 import { EmailSessionsRepo } from "./email/email-sessions.repo.js";
 import { buildEmailRouter } from "./email/router.js";
+import { CampaignsRepo } from "./campaigns/campaigns.repo.js";
+import { ContactsRepo } from "./campaigns/contacts.repo.js";
+import { CampaignAttemptsRepo } from "./campaigns/campaign-attempts.repo.js";
+import { CampaignDocsRepo, CampaignEventsRepo } from "./campaigns/campaign-docs.repo.js";
+import { registerCampaignRoutes } from "./campaigns/campaigns.routes.js";
+import { buildCampaignSender } from "./campaigns/campaign-sender.js";
+import { registerCampaignUploadRoutes, uploadUrlFor } from "./campaigns/upload.routes.js";
+import { buildIvrDialer, IvrDialer } from "./campaigns/ivr.client.js";
+import { registerIvrRoutes } from "./campaigns/ivr.routes.js";
 
 export function buildServer(deps: {
   pool: pg.Pool;
@@ -45,8 +54,11 @@ export function buildServer(deps: {
   interakt?: InteraktClient;
   vision?: VisionClient;
   mailer?: Mailer;
+  ivrDialer?: IvrDialer;
 }): FastifyInstance {
-  const app = Fastify({ logger: true });
+  // maxParamLength: the campaign upload link carries its HMAC token as a path
+  // param (~180 chars); Fastify's default of 100 would 404 it.
+  const app = Fastify({ logger: true, maxParamLength: 500 });
   // Interakt signs /wa/inbound with an HMAC of the RAW body; the JSON content-type
   // parser below only hands handlers the parsed object, so capture the raw bytes
   // for this one route before parsing.
@@ -73,6 +85,11 @@ export function buildServer(deps: {
       (err as any).statusCode = 400;
       done(err as Error, undefined);
     }
+  });
+  // Campaign contact upload posts the sheet as raw text; keep it a string so the
+  // CSV parser sees it verbatim instead of the catch-all turning it into {}.
+  app.addContentTypeParser("text/csv", { parseAs: "string" }, (_req, body, done) => {
+    done(null, body);
   });
   // Catch-all: Plivo CX sends an empty body as application/octet-stream (415 by
   // default). Accept any other content type — empty → {}, else best-effort JSON —
@@ -168,6 +185,70 @@ export function buildServer(deps: {
     mint,
   });
 
+  // Campaign outreach (CSV list → WhatsApp leg → IVR leg → manual queue). Its
+  // own tables and repos; it shares the Interakt client, Plivo credentials and
+  // this API key with the sourcing product.
+  const campaignsRepo = new CampaignsRepo(deps.pool);
+  const contactsRepo = new ContactsRepo(deps.pool);
+  const campaignAttemptsRepo = new CampaignAttemptsRepo(deps.pool);
+  const campaignDocsRepo = new CampaignDocsRepo(deps.pool);
+  const campaignEventsRepo = new CampaignEventsRepo(deps.pool);
+  const campaignSender = interakt
+    ? buildCampaignSender({
+        interakt,
+        attempts: campaignAttemptsRepo,
+        sessions: waSessions,
+        config: deps.config,
+      })
+    : undefined;
+  const leg1Deps = campaignSender
+    ? {
+        contacts: contactsRepo,
+        attempts: campaignAttemptsRepo,
+        events: campaignEventsRepo,
+        sender: campaignSender,
+        config: deps.config,
+      }
+    : undefined;
+  // Browser upload page + file read-back. Registered unconditionally: the token
+  // is the auth, and without WhatsApp the link can still be handed out manually.
+  registerCampaignUploadRoutes(
+    app,
+    {
+      contacts: contactsRepo,
+      docs: campaignDocsRepo,
+      events: campaignEventsRepo,
+      config: deps.config,
+      vision,
+    },
+    preHandler,
+  );
+
+  // Leg 2 is a DTMF menu served by this app; the voice agent isn't involved.
+  const leg2Deps = {
+    pool: deps.pool,
+    contacts: contactsRepo,
+    attempts: campaignAttemptsRepo,
+    events: campaignEventsRepo,
+    dialer: deps.ivrDialer ?? buildIvrDialer(deps.config),
+    config: deps.config,
+  };
+  registerIvrRoutes(app, leg2Deps);
+
+  registerCampaignRoutes(
+    app,
+    {
+      pool: deps.pool,
+      campaigns: campaignsRepo,
+      contacts: contactsRepo,
+      events: campaignEventsRepo,
+      config: deps.config,
+      leg1: leg1Deps,
+      leg2: leg2Deps,
+    },
+    preHandler,
+  );
+
   // Magic-link routes are public (the HMAC token is the auth) and registered
   // unconditionally — a no-op dead end when email sending is off.
   const actions: ActionDeps = { availability, callsRepo, loadsRepo, demandRepo };
@@ -181,6 +262,19 @@ export function buildServer(deps: {
       config: deps.config,
       sessions: waSessions,
       ownersRepo,
+      campaignContacts: contactsRepo,
+      campaign: campaignSender
+        ? {
+            contacts: contactsRepo,
+            attempts: campaignAttemptsRepo,
+            docs: campaignDocsRepo,
+            events: campaignEventsRepo,
+            sender: campaignSender,
+            config: deps.config,
+            vision,
+            uploadUrl: (c) => uploadUrlFor(deps.config, c),
+          }
+        : undefined,
       driver: { availability, interakt, sessions: waSessions, callsRepo, loadsRepo, config: deps.config, docs },
       customer: { capture, interakt, sessions: waSessions, demandRepo, loadsRepo, availability, callsRepo, parseLoad: buildLoadParser(deps.config), config: deps.config, mint },
     });

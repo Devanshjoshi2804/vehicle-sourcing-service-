@@ -173,6 +173,87 @@ export type DriverDoc = {
 };
 export type LoadDocs = { lr: Lr | null; docs: DriverDoc[] };
 
+// ---- campaign outreach ----
+export type Campaign = {
+  id: string;
+  code: string;
+  name: string;
+  status: "DRAFT" | "RUNNING" | "CLOSED";
+  createdBy: string;
+  createdAt: string;
+};
+export type ContactStage =
+  | "UPLOADED" | "INVALID"
+  | "L1_SENT" | "L1_INTERESTED" | "L1_DECLINED" | "L1_NO_REPLY"
+  | "DOC_RECEIVED" | "DOC_VERIFIED"
+  | "L2_QUEUED" | "L2_INTERESTED" | "L2_DECLINED" | "L2_NO_KEY"
+  | "L3_QUEUED" | "CONFIRMED" | "CLOSED_LOST";
+export type CampaignContact = {
+  id: string;
+  campaignId: string;
+  name: string;
+  phoneDigits: string;
+  city: string | null;
+  refId: string | null;
+  stage: ContactStage;
+  ownerAgent: string | null;
+  note: string | null;
+  invalidReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type QueueRow = CampaignContact & {
+  leg1Result: string | null;
+  leg2Result: string | null;
+  attempts: number;
+  lastTouch: string | null;
+  history: { id: string; leg: number | null; kind: string; detail: Record<string, unknown>; at: string }[];
+};
+export type LegRecon = {
+  leg: "L1" | "L2" | "L3";
+  channel: string;
+  entered: number;
+  key1: number;
+  key2: number;
+  noAnswer: number;
+  toNextLeg: number;
+  balances: boolean;
+};
+export type CampaignSummary = {
+  campaign: Campaign;
+  totals: { uploaded: number; invalid: number; contacts: number };
+  leg1: { sent: number; interested: number; declined: number; noReply: number; docsReceived: number; docsVerified: number };
+  leg2: { queued: number; interested: number; declined: number; noKey: number };
+  leg3: { queued: number; confirmed: number; closedLost: number };
+  closedByAutomation: number;
+  manualCalls: number;
+  manualReductionPct: number;
+  reconciliation: LegRecon[];
+};
+
+// CSV goes up as a raw text body (no multipart on the server) and reports come
+// back as a blob the browser saves — neither fits the JSON `req` helper.
+async function postCsv(path: string, csv: string) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "text/csv" },
+    body: csv,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  return res.json() as Promise<{ received: number; loaded: number; invalid: number; rejected: { name: string; reason: string }[] }>;
+}
+
+export async function downloadCsv(path: string, filename: string) {
+  const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${KEY}` } });
+  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
   // owners
   listOwners: () => req<Owner[]>("GET", "/owners"),
@@ -224,4 +305,21 @@ export const api = {
   lrsNeedingReview: () => req<Lr[]>("GET", "/lrs?needsReview=true"),
   markLrPaid: (id: string) => req<{ status: "PAID"; paidAt: string }>("POST", `/lrs/${id}/mark-paid`),
   resolveDispute: (id: string) => req<{ dispute: "RESOLVED" }>("POST", `/docs/${id}/resolve-dispute`),
+  // campaign outreach
+  listCampaigns: () => req<Campaign[]>("GET", "/campaigns"),
+  createCampaign: (name: string, createdBy = "console") =>
+    req<Campaign>("POST", "/campaigns", { name, createdBy }),
+  uploadContacts: (id: string, csv: string) => postCsv(`/campaigns/${id}/contacts`, csv),
+  campaignContacts: (id: string) => req<CampaignContact[]>("GET", `/campaigns/${id}/contacts`),
+  campaignSummary: (id: string) => req<CampaignSummary>("GET", `/campaigns/${id}/summary`),
+  fireLeg1: (id: string) => req<{ sent: number; failed: number }>("POST", `/campaigns/${id}/fire-leg1`),
+  dialLeg2: (id: string) =>
+    req<{ queued: number; dialed: number; failed: number }>("POST", `/campaigns/${id}/dial-leg2`),
+  manualQueue: (id: string) => req<QueueRow[]>("GET", `/campaigns/${id}/queue`),
+  assignContact: (contactId: string, ownerAgent: string) =>
+    req<CampaignContact>("POST", `/campaigns/contacts/${contactId}/assign`, { ownerAgent }),
+  disposeContact: (contactId: string, outcome: "CONFIRMED" | "CLOSED_LOST", note?: string) =>
+    req<CampaignContact>("POST", `/campaigns/contacts/${contactId}/disposition`, { outcome, note }),
+  exportCampaign: (id: string, code: string, leg: "1" | "2" | "3" | "all") =>
+    downloadCsv(`/campaigns/${id}/export?leg=${leg}`, `${code}-leg${leg}.csv`),
 };
